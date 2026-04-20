@@ -9,6 +9,7 @@ Strategy:
 
 from __future__ import annotations
 
+import os
 import re
 from functools import lru_cache
 
@@ -16,6 +17,8 @@ from functools import lru_cache
 @lru_cache(maxsize=1)
 def _get_spacy_pipeline():
     """Return a cached sentence splitter pipeline, or None when unavailable."""
+    if os.getenv("HALLUCIN_USE_SPACY", "0") != "1":
+        return None
     try:
         import spacy
 

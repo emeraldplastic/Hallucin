@@ -4,6 +4,7 @@ import os
 from typing import Any
 
 from flask import Flask, jsonify, render_template, request
+from werkzeug.exceptions import HTTPException
 from werkzeug.exceptions import RequestEntityTooLarge
 
 from .detector import detect
@@ -40,7 +41,7 @@ def create_app(config: dict[str, Any] | None = None) -> Flask:
 
         context = (payload.get("context", "") if payload else "").strip()
         response = (payload.get("response", "") if payload else "").strip()
-        model_name = (payload.get("model_name") if payload else None) or "all-MiniLM-L6-v2"
+        model_name = (payload.get("model_name") if payload else None) or "local"
 
         context_file = request.files.get("context_file")
         response_file = request.files.get("response_file")
@@ -98,6 +99,13 @@ def create_app(config: dict[str, Any] | None = None) -> Flask:
     @app.errorhandler(ValueError)
     def bad_upload(exc: ValueError):
         return jsonify({"error": str(exc)}), 400
+
+    @app.errorhandler(Exception)
+    def unhandled(exc: Exception):
+        if isinstance(exc, HTTPException):
+            return jsonify({"error": exc.description}), exc.code
+        app.logger.exception("Unhandled error while processing request")
+        return jsonify({"error": "Internal server error"}), 500
 
     return app
 

@@ -47,7 +47,7 @@ def detect(
     response,
     use_llm: bool = False,
     anthropic_client=None,
-    model_name="all-MiniLM-L6-v2",
+    model_name="local",
     llm_model="claude-haiku-4-5-20251001",
 ):
     from .scorer import load_model

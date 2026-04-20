@@ -34,6 +34,7 @@ form.addEventListener("submit", async (event) => {
     let response;
     if (currentMode === "files") {
       const formData = new FormData(form);
+      formData.append("model_name", "local");
       response = await fetch("/api/analyze", {
         method: "POST",
         body: formData,
@@ -42,6 +43,7 @@ form.addEventListener("submit", async (event) => {
       const payload = {
         context: document.getElementById("context").value,
         response: document.getElementById("response").value,
+        model_name: "local",
       };
       response = await fetch("/api/analyze", {
         method: "POST",
@@ -50,9 +52,17 @@ form.addEventListener("submit", async (event) => {
       });
     }
 
-    const data = await response.json();
+    const raw = await response.text();
+    let data = null;
+    try {
+      data = JSON.parse(raw);
+    } catch {
+      const snippet = raw.slice(0, 140).replace(/\s+/g, " ").trim();
+      throw new Error(`Server returned non-JSON (${response.status}). ${snippet}`);
+    }
+
     if (!response.ok) {
-      throw new Error(data.error || "Analysis failed");
+      throw new Error(data.error || `Analysis failed (${response.status})`);
     }
 
     renderResult(data);
