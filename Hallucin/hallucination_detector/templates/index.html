@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Hallucin Studio</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <div class="bg-shape shape-a"></div>
+  <div class="bg-shape shape-b"></div>
+
+  <main class="shell">
+    <header class="hero">
+      <p class="eyebrow">Grounding Analyzer</p>
+      <h1>Hallucin Studio</h1>
+      <p class="lead">
+        Stress-test model answers against your source context with a fast offline-first detector.
+      </p>
+      <div class="badges">
+        <span>Upload up to {{ max_upload_mb }} MB</span>
+        <span>Realtime score + claim labels</span>
+        <span>Offline fallback enabled</span>
+      </div>
+    </header>
+
+    <section class="panel">
+      <div class="mode-row">
+        <button class="mode-btn active" data-mode="text" type="button">Text Input</button>
+        <button class="mode-btn" data-mode="files" type="button">File Upload</button>
+      </div>
+
+      <form id="analyze-form">
+        <div id="text-mode" class="mode-content">
+          <label for="context">Source Context</label>
+          <textarea id="context" name="context" placeholder="Paste trusted source material here..."></textarea>
+
+          <label for="response">Model Response</label>
+          <textarea id="response" name="response" placeholder="Paste model output to verify..."></textarea>
+        </div>
+
+        <div id="files-mode" class="mode-content hidden">
+          <label class="file-drop">
+            <span>Upload Context File</span>
+            <input id="context_file" name="context_file" type="file" accept=".txt,.md,.json,.csv,.log,.html,.xml,.pdf">
+          </label>
+          <label class="file-drop">
+            <span>Upload Response File</span>
+            <input id="response_file" name="response_file" type="file" accept=".txt,.md,.json,.csv,.log,.html,.xml,.pdf">
+          </label>
+          <p class="hint">Large-text workflows supported up to {{ max_text_chars }} characters after decoding.</p>
+        </div>
+
+        <button id="run-btn" class="run-btn" type="submit">Analyze Grounding</button>
+      </form>
+    </section>
+
+    <section class="panel results">
+      <div class="result-head">
+        <h2>Result</h2>
+        <span id="runtime">Runtime -- ms</span>
+      </div>
+      <div class="score-wrap">
+        <div id="score-value">0.00</div>
+        <div id="score-label">Waiting for analysis</div>
+      </div>
+      <div class="chips">
+        <span id="supported-chip">Supported: 0</span>
+        <span id="partial-chip">Partial: 0</span>
+        <span id="unsupported-chip">Unsupported: 0</span>
+      </div>
+      <div id="claims" class="claims"></div>
+    </section>
+  </main>
+
+  <script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>

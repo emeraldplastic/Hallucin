@@ -1,0 +1,283 @@
+:root {
+  --ink: #102323;
+  --muted: #4f6969;
+  --accent: #0a9f8f;
+  --accent-deep: #0f6b63;
+  --paper: #f4f7f4;
+  --panel: #ffffffd9;
+  --line: #c8d7d4;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: "Space Grotesk", "Segoe UI", sans-serif;
+  color: var(--ink);
+  background:
+    radial-gradient(circle at 10% 20%, #d9f5ef 0%, transparent 45%),
+    radial-gradient(circle at 90% 70%, #ffe8c4 0%, transparent 42%),
+    linear-gradient(135deg, #edf3f1 0%, #f9f4ec 100%);
+  min-height: 100vh;
+}
+
+.bg-shape {
+  position: fixed;
+  z-index: -1;
+  border-radius: 50%;
+  filter: blur(18px);
+}
+
+.shape-a {
+  width: 320px;
+  height: 320px;
+  background: #a9ebe0;
+  top: -80px;
+  right: -40px;
+}
+
+.shape-b {
+  width: 260px;
+  height: 260px;
+  background: #f8d6a5;
+  bottom: -70px;
+  left: -30px;
+}
+
+.shell {
+  width: min(1100px, 92vw);
+  margin: 2.5rem auto 2rem;
+  display: grid;
+  gap: 1rem;
+}
+
+.hero {
+  background: linear-gradient(120deg, #11302f 0%, #13514d 40%, #1a7a70 100%);
+  border-radius: 24px;
+  padding: 2rem;
+  color: #e9fbf8;
+  box-shadow: 0 30px 60px #09332f33;
+  animation: rise 500ms ease-out;
+}
+
+.eyebrow {
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  font-size: 0.72rem;
+  opacity: 0.75;
+  margin: 0 0 0.5rem;
+}
+
+h1 {
+  margin: 0;
+  font-size: clamp(2rem, 4vw, 3.1rem);
+  letter-spacing: -0.02em;
+}
+
+.lead {
+  margin-top: 0.8rem;
+  max-width: 65ch;
+  color: #d4f3ef;
+}
+
+.badges {
+  margin-top: 1.2rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+
+.badges span {
+  border: 1px solid #9be2d7;
+  padding: 0.35rem 0.65rem;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  color: #e2fffa;
+  background: #0e534b6e;
+}
+
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 22px;
+  padding: 1.1rem;
+  box-shadow: 0 20px 45px #0e3d3914;
+  animation: rise 600ms ease-out;
+}
+
+.mode-row {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 0.8rem;
+}
+
+.mode-btn {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 0.45rem 0.9rem;
+  font: inherit;
+  background: #fff;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.mode-btn.active {
+  border-color: var(--accent-deep);
+  color: #fff;
+  background: linear-gradient(130deg, var(--accent-deep), var(--accent));
+}
+
+label {
+  display: block;
+  font-size: 0.88rem;
+  margin: 0.4rem 0;
+  color: #2f4c4c;
+}
+
+textarea {
+  width: 100%;
+  min-height: 140px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 0.8rem;
+  font: 500 0.95rem/1.4 "IBM Plex Mono", ui-monospace, monospace;
+  resize: vertical;
+  background: #fcfffd;
+}
+
+.file-drop {
+  margin-bottom: 0.7rem;
+  border: 1px dashed #8fb5af;
+  border-radius: 14px;
+  padding: 1rem;
+  background: #f8fffd;
+}
+
+.file-drop input {
+  width: 100%;
+  margin-top: 0.5rem;
+}
+
+.hint {
+  margin-top: 0.2rem;
+  color: #5f7272;
+  font-size: 0.82rem;
+}
+
+.run-btn {
+  width: 100%;
+  margin-top: 0.8rem;
+  border: 0;
+  border-radius: 14px;
+  padding: 0.9rem 1rem;
+  font: 700 1rem "Space Grotesk", sans-serif;
+  color: #f3fffd;
+  background: linear-gradient(130deg, #125b54 0%, #0e9a8a 80%);
+  cursor: pointer;
+}
+
+.run-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.result-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+
+.result-head h2 {
+  margin: 0;
+}
+
+#runtime {
+  color: #65807f;
+  font-size: 0.84rem;
+}
+
+.score-wrap {
+  margin-top: 0.6rem;
+}
+
+#score-value {
+  font-size: 2.2rem;
+  font-weight: 700;
+}
+
+#score-label {
+  color: #587171;
+}
+
+.chips {
+  margin-top: 0.8rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+}
+
+.chips span {
+  font-size: 0.82rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 0.3rem 0.65rem;
+  background: #fff;
+}
+
+.claims {
+  margin-top: 1rem;
+  display: grid;
+  gap: 0.55rem;
+}
+
+.claim {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fff;
+  padding: 0.65rem 0.75rem;
+}
+
+.claim .meta {
+  color: #5f7474;
+  font-size: 0.79rem;
+  margin-top: 0.35rem;
+}
+
+.claim.supported {
+  border-left: 5px solid #218f5a;
+}
+
+.claim.partial {
+  border-left: 5px solid #de9f1f;
+}
+
+.claim.unsupported {
+  border-left: 5px solid #d44848;
+}
+
+.hidden {
+  display: none;
+}
+
+@keyframes rise {
+  from {
+    transform: translateY(8px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+@media (max-width: 768px) {
+  .hero {
+    padding: 1.5rem;
+  }
+
+  #score-value {
+    font-size: 1.8rem;
+  }
+}

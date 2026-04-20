@@ -11,7 +11,11 @@ dependencies = [
     "sentence-transformers>=2.7.0",
     "numpy>=1.24.0",
     "spacy>=3.7.0",
+    "flask>=2.3.0",
 ]
+
+[project.scripts]
+hallucin = "hallucination_detector.__main__:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
