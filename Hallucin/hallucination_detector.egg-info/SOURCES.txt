@@ -1,6 +1,8 @@
 README.md
 pyproject.toml
 setup.py
+api/__init__.py
+api/index.py
 examples/basic_usage.py
 hallucination_detector/__init__.py
 hallucination_detector/__main__.py
@@ -16,6 +18,7 @@ hallucination_detector.egg-info/requires.txt
 hallucination_detector.egg-info/top_level.txt
 tests/__init__.py
 tests/test_detector.py
+tests/test_vercel_entrypoint.py
 tests/test_webapp.py
 venv/Lib/site-packages/_distutils_hack/__init__.py
 venv/Lib/site-packages/_distutils_hack/override.py

@@ -7,11 +7,15 @@ setup(
     author="Hallucin Contributors",
     packages=find_packages(),
     install_requires=[
-        "sentence-transformers>=2.7.0",
         "numpy>=1.24.0",
-        "spacy>=3.7.0",
         "flask>=2.3.0",
     ],
+    extras_require={
+        "full": [
+            "sentence-transformers>=2.7.0",
+            "spacy>=3.7.0",
+        ]
+    },
     python_requires=">=3.9",
     entry_points={"console_scripts": ["hallucin=hallucination_detector.__main__:main"]},
 )

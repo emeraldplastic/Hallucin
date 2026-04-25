@@ -3,77 +3,159 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Hallucin Studio</title>
+  <title>Hallucin Studio — Grounding Analyzer</title>
+  <meta name="description" content="Stress-test model answers against trusted source context with a fast offline-first hallucination detector.">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
-  <div class="bg-shape shape-a"></div>
-  <div class="bg-shape shape-b"></div>
+
+  <!-- ambient glow blobs -->
+  <div class="glow glow--teal" aria-hidden="true"></div>
+  <div class="glow glow--violet" aria-hidden="true"></div>
+  <div class="glow glow--amber" aria-hidden="true"></div>
 
   <main class="shell">
-    <header class="hero">
-      <p class="eyebrow">Grounding Analyzer</p>
-      <h1>Hallucin Studio</h1>
-      <p class="lead">
-        Stress-test model answers against your source context with a fast offline-first detector.
-      </p>
-      <div class="badges">
-        <span>Upload up to {{ max_upload_mb }} MB</span>
-        <span>Realtime score + claim labels</span>
-        <span>Offline fallback enabled</span>
+
+    <!-- ─── NAV BAR ─── -->
+    <nav class="topbar anim-rise" id="topbar">
+      <div class="topbar__brand">
+        <svg class="topbar__logo" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <circle cx="14" cy="14" r="13" stroke="url(#logo-grad)" stroke-width="2"/>
+          <path d="M9 14.5L12.5 18L19 10" stroke="url(#logo-grad)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+          <defs><linearGradient id="logo-grad" x1="0" y1="0" x2="28" y2="28"><stop stop-color="#2dd4bf"/><stop offset="1" stop-color="#0284c7"/></linearGradient></defs>
+        </svg>
+        <span>Hallucin <em>Studio</em></span>
+      </div>
+      <div class="topbar__pills">
+        <span class="pill">Offline-first</span>
+        <span class="pill">{{ max_upload_mb }} MB uploads</span>
+      </div>
+    </nav>
+
+    <!-- ─── HERO ─── -->
+    <header class="hero anim-rise" style="--delay:.08s">
+      <div class="hero__text">
+        <p class="hero__eyebrow"><span class="dot dot--live"></span>Grounding Analyzer</p>
+        <h1>Verify every claim.<br><span>Trust your context.</span></h1>
+        <p class="hero__sub">
+          Paste or upload your source material and the model response — Hallucin scores each claim against your context in real time.
+        </p>
+      </div>
+      <div class="hero__badges">
+        <span class="badge"><span class="badge__icon">⚡</span>Realtime scoring</span>
+        <span class="badge"><span class="badge__icon">🔒</span>Privacy-first</span>
+        <span class="badge"><span class="badge__icon">🧠</span>Hybrid matching</span>
       </div>
     </header>
 
-    <section class="panel">
-      <div class="mode-row">
-        <button class="mode-btn active" data-mode="text" type="button">Text Input</button>
-        <button class="mode-btn" data-mode="files" type="button">File Upload</button>
+    <!-- ─── INPUT PANEL ─── -->
+    <section class="card anim-rise" style="--delay:.16s" id="input-panel">
+      <div class="card__head">
+        <h2 class="card__title">Input</h2>
+        <div class="mode-toggle" id="mode-toggle">
+          <button class="mode-toggle__btn active" data-mode="text" type="button" id="btn-mode-text">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><rect x="2" y="3" width="12" height="2" rx="1" fill="currentColor"/><rect x="2" y="7" width="9" height="2" rx="1" fill="currentColor"/><rect x="2" y="11" width="7" height="2" rx="1" fill="currentColor"/></svg>
+            Text
+          </button>
+          <button class="mode-toggle__btn" data-mode="files" type="button" id="btn-mode-files">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M3 2a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1V5.414a1 1 0 0 0-.293-.707L10.293 1.293A1 1 0 0 0 9.586 1H3z" stroke="currentColor" stroke-width="1.3"/><path d="M9 1v4h4" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>
+            Files
+          </button>
+          <div class="mode-toggle__highlight" id="mode-highlight"></div>
+        </div>
       </div>
 
-      <form id="analyze-form">
-        <div id="text-mode" class="mode-content">
-          <label for="context">Source Context</label>
-          <textarea id="context" name="context" placeholder="Paste trusted source material here..."></textarea>
-
-          <label for="response">Model Response</label>
-          <textarea id="response" name="response" placeholder="Paste model output to verify..."></textarea>
+      <form id="analyze-form" autocomplete="off">
+        <!-- TEXT MODE -->
+        <div id="text-mode" class="mode-pane">
+          <div class="field">
+            <label for="context" class="field__label">Source Context</label>
+            <textarea id="context" name="context" class="field__input" placeholder="Paste trusted source material here..." rows="5"></textarea>
+          </div>
+          <div class="field">
+            <label for="response" class="field__label">Model Response</label>
+            <textarea id="response" name="response" class="field__input" placeholder="Paste model output to verify..." rows="5"></textarea>
+          </div>
         </div>
 
-        <div id="files-mode" class="mode-content hidden">
-          <label class="file-drop">
-            <span>Upload Context File</span>
-            <input id="context_file" name="context_file" type="file" accept=".txt,.md,.json,.csv,.log,.html,.xml,.pdf">
-          </label>
-          <label class="file-drop">
-            <span>Upload Response File</span>
-            <input id="response_file" name="response_file" type="file" accept=".txt,.md,.json,.csv,.log,.html,.xml,.pdf">
-          </label>
-          <p class="hint">Large-text workflows supported up to {{ max_text_chars }} characters after decoding.</p>
+        <!-- FILE MODE -->
+        <div id="files-mode" class="mode-pane hidden">
+          <div class="drop-grid">
+            <label class="dropzone" id="dropzone-context">
+              <div class="dropzone__icon">
+                <svg width="32" height="32" viewBox="0 0 32 32" fill="none"><path d="M16 6v14M10 14l6 6 6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M6 22v2a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-2" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+              </div>
+              <span class="dropzone__title">Context File</span>
+              <span class="dropzone__hint" id="dropzone-context-name">Drop or click to upload</span>
+              <input id="context_file" name="context_file" type="file" accept="{{ allowed_upload_accept }}" class="sr-only">
+            </label>
+            <label class="dropzone" id="dropzone-response">
+              <div class="dropzone__icon">
+                <svg width="32" height="32" viewBox="0 0 32 32" fill="none"><path d="M16 6v14M10 14l6 6 6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M6 22v2a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-2" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+              </div>
+              <span class="dropzone__title">Response File</span>
+              <span class="dropzone__hint" id="dropzone-response-name">Drop or click to upload</span>
+              <input id="response_file" name="response_file" type="file" accept="{{ allowed_upload_accept }}" class="sr-only">
+            </label>
+          </div>
+          <p class="meta-text">Allowed: {{ allowed_upload_types }}. Files processed in-memory only — up to {{ max_text_chars|default('2 000 000') }} chars.</p>
         </div>
 
-        <button id="run-btn" class="run-btn" type="submit">Analyze Grounding</button>
+        <button id="run-btn" class="btn-primary" type="submit">
+          <span class="btn-primary__label">Analyze Grounding</span>
+          <span class="btn-primary__loader" id="btn-loader" aria-hidden="true">
+            <span></span><span></span><span></span>
+          </span>
+        </button>
       </form>
     </section>
 
-    <section class="panel results">
-      <div class="result-head">
-        <h2>Result</h2>
-        <span id="runtime">Runtime -- ms</span>
+    <!-- ─── RESULTS PANEL ─── -->
+    <section class="card card--result anim-rise" style="--delay:.24s" id="result-panel">
+      <div class="card__head">
+        <h2 class="card__title">Results</h2>
+        <span class="runtime" id="runtime">Runtime — ms</span>
       </div>
-      <div class="score-wrap">
-        <div id="score-value">0.00</div>
-        <div id="score-label">Waiting for analysis</div>
+
+      <!-- SCORE GAUGE -->
+      <div class="gauge" id="gauge">
+        <svg class="gauge__ring" viewBox="0 0 140 140">
+          <circle class="gauge__track" cx="70" cy="70" r="62" />
+          <circle class="gauge__fill" cx="70" cy="70" r="62" id="gauge-fill" />
+        </svg>
+        <div class="gauge__inner">
+          <span class="gauge__value" id="score-value">0.00</span>
+          <span class="gauge__label" id="score-label">Waiting for analysis</span>
+        </div>
       </div>
-      <div class="chips">
-        <span id="supported-chip">Supported: 0</span>
-        <span id="partial-chip">Partial: 0</span>
-        <span id="unsupported-chip">Unsupported: 0</span>
+
+      <!-- STAT CHIPS -->
+      <div class="stat-row" id="stat-row">
+        <div class="stat stat--green">
+          <span class="stat__num" id="stat-supported">0</span>
+          <span class="stat__tag">Supported</span>
+        </div>
+        <div class="stat stat--amber">
+          <span class="stat__num" id="stat-partial">0</span>
+          <span class="stat__tag">Partial</span>
+        </div>
+        <div class="stat stat--red">
+          <span class="stat__num" id="stat-unsupported">0</span>
+          <span class="stat__tag">Unsupported</span>
+        </div>
       </div>
+
+      <!-- CLAIMS LIST -->
       <div id="claims" class="claims"></div>
     </section>
+
+    <footer class="footer anim-rise" style="--delay:.32s">
+      <span>Hallucin Studio · Offline-first grounding analysis</span>
+    </footer>
+
   </main>
 
   <script src="{{ url_for('static', filename='app.js') }}"></script>

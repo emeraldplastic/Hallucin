@@ -7,6 +7,8 @@ automatically falls back to a fast local hashing encoder when offline.
 
 from __future__ import annotations
 
+import math
+import os
 import re
 from dataclasses import dataclass
 from functools import lru_cache
@@ -22,6 +24,40 @@ SupportLabel = Literal["supported", "partial", "unsupported"]
 
 _TOKEN_RE = re.compile(r"[A-Za-z0-9]+")
 _NUMBER_RE = re.compile(r"\d+(?:\.\d+)?")
+_NEGATION_RE = re.compile(r"\b(?:no|not|never|none|without|cannot|can't|won't|n't)\b")
+_STOPWORDS = {
+    "a",
+    "an",
+    "and",
+    "are",
+    "as",
+    "at",
+    "be",
+    "by",
+    "for",
+    "from",
+    "has",
+    "he",
+    "in",
+    "is",
+    "it",
+    "its",
+    "of",
+    "on",
+    "that",
+    "the",
+    "to",
+    "was",
+    "were",
+    "will",
+    "with",
+}
+
+MAX_CONTEXT_CHUNKS = max(1, int(os.getenv("HALLUCIN_MAX_CONTEXT_CHUNKS", "240")))
+TOP_MATCH_CANDIDATES = max(1, int(os.getenv("HALLUCIN_TOP_MATCH_CANDIDATES", "3")))
+FULL_CONTEXT_APPEND_LIMIT = max(
+    0, int(os.getenv("HALLUCIN_FULL_CONTEXT_APPEND_LIMIT", "24000"))
+)
 
 
 @dataclass
@@ -111,12 +147,15 @@ def chunk_context(context: str, chunk_size: int = 3) -> list[str]:
     clean = (context or "").strip()
     if not clean:
         return [""]
+    return list(_chunk_context_cached(clean, max(1, int(chunk_size))))
 
+
+@lru_cache(maxsize=128)
+def _chunk_context_cached(clean: str, chunk_size: int) -> tuple[str, ...]:
     sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", clean) if s.strip()]
     if not sentences:
-        return [clean]
+        return (clean,)
 
-    chunk_size = max(1, int(chunk_size))
     stride = max(1, chunk_size - 1)
     chunks: list[str] = []
     for i in range(0, len(sentences), stride):
@@ -124,9 +163,15 @@ def chunk_context(context: str, chunk_size: int = 3) -> list[str]:
         if window:
             chunks.append(" ".join(window))
 
-    if clean not in chunks:
-        chunks.append(clean)
-    return chunks
+    if len(chunks) > MAX_CONTEXT_CHUNKS:
+        step = max(1, math.ceil(len(chunks) / MAX_CONTEXT_CHUNKS))
+        chunks = chunks[::step]
+
+    if FULL_CONTEXT_APPEND_LIMIT and len(clean) <= FULL_CONTEXT_APPEND_LIMIT:
+        if clean not in chunks:
+            chunks.append(clean)
+
+    return tuple(chunks)
 
 
 def score_claims(
@@ -140,11 +185,17 @@ def score_claims(
 
     if model is None:
         model = load_model()
+    elif isinstance(model, str):
+        model = load_model(model)
 
     chunks = chunk_context(context)
-
-    all_texts = claims + chunks
-    embeddings = model.encode(all_texts, convert_to_numpy=True, normalize_embeddings=True)
+    unique_texts, remap = _dedupe_texts(claims + chunks)
+    unique_embeddings = model.encode(
+        unique_texts,
+        convert_to_numpy=True,
+        normalize_embeddings=True,
+    )
+    embeddings = unique_embeddings[remap]
     claim_embeddings = embeddings[: len(claims)]
     chunk_embeddings = embeddings[len(claims) :]
 
@@ -152,12 +203,21 @@ def score_claims(
     sim_matrix = np.matmul(claim_embeddings, chunk_embeddings.T)
 
     chunk_numbers = [_extract_numbers(chunk) for chunk in chunks]
+    chunk_token_sets = [_content_tokens(chunk) for chunk in chunks]
+    chunk_negation = [_has_negation(chunk) for chunk in chunks]
     results: list[ClaimResult] = []
 
     for idx, claim in enumerate(claims):
         sims = sim_matrix[idx]
-        best_idx = int(np.argmax(sims))
-        score = float(sims[best_idx])
+        claim_tokens = _content_tokens(claim)
+        claim_has_negation = _has_negation(claim)
+        best_idx, score = _best_match_with_lexical_blend(
+            sims=sims,
+            claim_tokens=claim_tokens,
+            chunk_token_sets=chunk_token_sets,
+            claim_has_negation=claim_has_negation,
+            chunk_negation=chunk_negation,
+        )
         score = _apply_number_penalty(claim, score, chunk_numbers[best_idx])
 
         results.append(
@@ -183,6 +243,73 @@ def overall_score(claim_results: list[ClaimResult]) -> float:
 
 def _extract_numbers(text: str) -> set[str]:
     return set(_NUMBER_RE.findall(text or ""))
+
+
+def _dedupe_texts(texts: list[str]) -> tuple[list[str], np.ndarray]:
+    unique_texts: list[str] = []
+    index_by_text: dict[str, int] = {}
+    remap = np.zeros(len(texts), dtype=np.int32)
+
+    for idx, text in enumerate(texts):
+        cached_index = index_by_text.get(text)
+        if cached_index is None:
+            cached_index = len(unique_texts)
+            unique_texts.append(text)
+            index_by_text[text] = cached_index
+        remap[idx] = cached_index
+
+    return unique_texts, remap
+
+
+def _content_tokens(text: str) -> set[str]:
+    return {
+        token
+        for token in _TOKEN_RE.findall((text or "").lower())
+        if len(token) > 1 and token not in _STOPWORDS
+    }
+
+
+def _has_negation(text: str) -> bool:
+    return bool(_NEGATION_RE.search((text or "").lower()))
+
+
+def _coverage_ratio(claim_tokens: set[str], chunk_tokens: set[str]) -> float:
+    if not claim_tokens:
+        return 0.0
+    overlap = claim_tokens.intersection(chunk_tokens)
+    return len(overlap) / len(claim_tokens)
+
+
+def _best_match_with_lexical_blend(
+    sims: np.ndarray,
+    claim_tokens: set[str],
+    chunk_token_sets: list[set[str]],
+    claim_has_negation: bool,
+    chunk_negation: list[bool],
+) -> tuple[int, float]:
+    candidate_count = min(TOP_MATCH_CANDIDATES, sims.shape[0])
+    if candidate_count == sims.shape[0]:
+        candidate_indices = np.arange(sims.shape[0], dtype=np.int32)
+    elif candidate_count == 1:
+        candidate_indices = np.array([int(np.argmax(sims))], dtype=np.int32)
+    else:
+        candidate_indices = np.argpartition(sims, -candidate_count)[-candidate_count:]
+
+    best_idx = int(candidate_indices[0])
+    best_score = -1.0
+    for candidate in candidate_indices:
+        idx = int(candidate)
+        semantic = float(sims[idx])
+        lexical = _coverage_ratio(claim_tokens, chunk_token_sets[idx])
+        blended = 0.84 * semantic + 0.16 * lexical
+        if claim_has_negation != chunk_negation[idx]:
+            blended *= 0.92
+
+        if blended > best_score:
+            best_idx = idx
+            best_score = blended
+
+    return best_idx, max(0.0, min(1.0, best_score))
 
 
 def _apply_number_penalty(claim: str, base_score: float, chunk_nums: set[str]) -> float:
