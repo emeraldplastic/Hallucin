@@ -1,36 +1,18 @@
-# Virtual environments
+# Projects to ignore in the Hallucin repository
+RUME AI/
+RAGkb/
+VisioNarrate/
+
+# Standard ignores
 venv/
 .venv/
-env/
-
-# Python cache
 __pycache__/
 *.py[cod]
-*.pyo
-
-# Pytest
 .pytest_cache/
-
-# Package build artifacts
-*.egg-info/
-dist/
-build/
-
-# IDE & editor
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
-
-# OS generated
-.DS_Store
-Thumbs.db
-desktop.ini
-
-# Vercel
-.vercel
-
-# Environment files
+.vercel/
 .env
 .env.local
+node_modules/
+dist/
+build/
+*.egg-info/
