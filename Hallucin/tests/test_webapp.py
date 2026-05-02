@@ -66,6 +66,16 @@ def test_analyze_requires_inputs():
     assert response.status_code == 400
 
 
+def test_analyze_rejects_oversized_json_text():
+    client, _ = _client({"MAX_TEXT_CHARS": 8})
+    response = client.post(
+        "/api/analyze",
+        json={"context": "too much text", "response": "short"},
+    )
+    assert response.status_code == 400
+    assert "Context exceeds max length" in response.get_json()["error"]
+
+
 def test_privacy_headers_enabled_by_default():
     client, _ = _client()
     response = client.get("/health")

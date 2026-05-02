@@ -1,39 +1,62 @@
-﻿# Hallucin Studio
+<p align="center">
+  <strong>Hallucin Studio</strong><br>
+  <em>Offline-first grounding analysis for LLM responses</em>
+</p>
 
-Hallucin Studio is an offline-first hallucination detection toolkit plus a web app.
+<p align="center">
+  <a href="#install">Install</a> •
+  <a href="#run-the-web-app">Web App</a> •
+  <a href="#python-api">Python API</a> •
+  <a href="#rest-api">REST API</a> •
+  <a href="#deploy-on-vercel">Deploy</a> •
+  <a href="#test">Test</a> •
+  <a href="#license">License</a>
+</p>
 
-It checks whether model responses are grounded in a trusted context, labels each claim,
-and gives a document-level grounding score.
+---
 
-## Highlights
+## What Is Hallucin Studio?
 
-- Offline-first scoring with automatic fallback when transformer weights are unavailable
-- Fast claim scoring via vectorized similarity matrix operations
-- Hybrid semantic + lexical matching for stronger grounding accuracy
-- Numeric and negation mismatch penalties to catch common fact swaps faster
-- Modern Flask web app with drag-and-drop style uploads
-- Privacy defaults (no-cache responses + in-memory file processing only)
-- Context chunk capping for faster analysis on very large documents
-- Large upload support (128 MB by default)
-- API + UI + unit tests
+Hallucin Studio is an **offline-first hallucination detection toolkit and web app**. It compares model responses against trusted source context, splits the response into atomic claims, scores each claim against the context using hybrid semantic and lexical matching, and returns a document-level grounding score with per-claim labels.
+
+### Key Features
+
+| Feature | Details |
+|---|---|
+| **Offline-first scoring** | Deterministic local hash encoder — no network, no GPU required |
+| **Optional transformer embeddings** | Upgrade to `sentence-transformers` when local model weights are available |
+| **Hybrid matching** | Blended semantic similarity + lexical coverage ratio |
+| **Numeric & negation penalties** | Catches common factual number swaps and negation mismatches |
+| **Web app** | Flask UI with text input and file upload modes |
+| **Privacy by default** | In-memory processing — no uploads stored on disk |
+| **Security hardened** | Cache-control, CSRF-safe headers, rate limiting, upload validation |
+| **Vercel-ready** | One-command cloud deployment with health check endpoint |
+| **Tested** | 29 unit tests covering detector, web API, uploads, and deployment |
+
+---
 
 ## Install
+
+**Minimal (offline scoring only):**
 
 ```bash
 pip install -e .
 ```
 
-Optional full ML dependencies (transformer + spaCy):
+**Full (with transformer embeddings and spaCy sentence splitting):**
 
 ```bash
 pip install -e ".[full]"
-```
-
-Optional: if you want richer sentence splitting via spaCy model locally:
-
-```bash
 python -m spacy download en_core_web_sm
 ```
+
+### Requirements
+
+- Python ≥ 3.9
+- `numpy ≥ 1.24`
+- `flask ≥ 2.3`
+
+---
 
 ## Run The Web App
 
@@ -41,26 +64,19 @@ python -m spacy download en_core_web_sm
 hallucin
 ```
 
-Open `http://127.0.0.1:8000`.
+Open **http://127.0.0.1:8000** in your browser.
 
-Environment knobs:
+### Environment Variables
 
-- `HALLUCIN_MAX_UPLOAD_MB` (default: `128`)
-- `HALLUCIN_MAX_TEXT_CHARS` (default: `2000000`)
-- `HALLUCIN_ALLOWED_UPLOAD_EXTENSIONS` (default: `.txt,.md,.json,.csv,.log,.html,.xml`)
-- `HALLUCIN_RATE_LIMIT_REQUESTS` (default: `60`, set `0` to disable)
-- `HALLUCIN_RATE_LIMIT_WINDOW_SECONDS` (default: `60`)
-- `HALLUCIN_ENABLE_PRIVACY_HEADERS` (default: `1`)
-- `HALLUCIN_MAX_CONTEXT_CHUNKS` (default: `240`, lower is faster)
-- `HALLUCIN_TOP_MATCH_CANDIDATES` (default: `3`)
-- `HALLUCIN_FULL_CONTEXT_APPEND_LIMIT` (default: `24000`, chars)
-- `HALLUCIN_HOST` (default: `127.0.0.1`)
-- `HALLUCIN_PORT` (default: `8000`)
-- `HALLUCIN_DEBUG` (`1` enables debug)
+| Variable | Default | Description |
+|---|---|---|
+| `HALLUCIN_HOST` | `127.0.0.1` | Bind address |
+| `HALLUCIN_PORT` | `8000` | Bind port |
+| `HALLUCIN_DEBUG` | `0` | Enable Flask debug mode (`1` to enable) |
 
-Uploads are validated server-side and must be UTF-8 text files with an allowed extension. Uploaded files are processed in-memory and not written to disk by the app.
+---
 
-## Python Usage
+## Python API
 
 ```python
 from hallucination_detector import detect
@@ -70,22 +86,29 @@ result = detect(
     response="The Eiffel Tower is in Paris and 330 metres tall.",
 )
 
-print(result.score)
-print(result.flagged_claims)
-result.report()
+print(result.score)           # 0.0 – 1.0
+print(result.flagged_claims)  # List of unsupported claim strings
+result.report()               # Print a formatted grounding report
 ```
 
-To force the local offline model:
+### DetectionResult Properties
 
-```python
-result = detect(context=my_context, response=my_response, model_name="local")
-```
+| Property | Type | Description |
+|---|---|---|
+| `score` | `float` | Document-level grounding score (0.0–1.0) |
+| `claims` | `list[ClaimResult]` | All scored claims |
+| `supported_claims` | `list[ClaimResult]` | Claims matching the context |
+| `partial_claims` | `list[ClaimResult]` | Partially supported claims |
+| `flagged_claims` | `list[str]` | Unsupported claim texts |
+| `elapsed_ms` | `float` | Processing time in milliseconds |
 
-## API Usage
+---
 
-### JSON
+## REST API
 
-`POST /api/analyze`
+### `POST /api/analyze`
+
+**JSON payload:**
 
 ```json
 {
@@ -95,55 +118,125 @@ result = detect(context=my_context, response=my_response, model_name="local")
 }
 ```
 
-### Multipart Uploads
+**Multipart file upload** is also supported with `context_file` and `response_file` fields.
 
-`POST /api/analyze`
+**Response:**
 
-- `context_file`: text file for source context
-- `response_file`: text file for model response
+```json
+{
+  "score": 0.85,
+  "elapsed_ms": 12.34,
+  "counts": { "supported": 3, "partial": 1, "unsupported": 0 },
+  "claims": [
+    {
+      "claim": "The Eiffel Tower is 330 metres tall.",
+      "label": "supported",
+      "score": 0.91,
+      "best_match": "It stands 330 metres tall..."
+    }
+  ]
+}
+```
+
+### `GET /health`
+
+Returns `{"status": "ok"}` — use for uptime monitoring and load balancer checks.
+
+---
+
+## Configuration
+
+All settings are optional and configured via environment variables.
+
+| Variable | Default | Description |
+|---|---|---|
+| `HALLUCIN_MAX_UPLOAD_MB` | `128` | Maximum upload size in megabytes |
+| `HALLUCIN_MAX_TEXT_CHARS` | `2000000` | Maximum text field length |
+| `HALLUCIN_ALLOWED_UPLOAD_EXTENSIONS` | `.txt,.md,.json,.csv,.log,.html,.xml` | Comma-separated allowed file types |
+| `HALLUCIN_RATE_LIMIT_REQUESTS` | `60` | Max requests per client per window |
+| `HALLUCIN_RATE_LIMIT_WINDOW_SECONDS` | `60` | Rate limit window duration |
+| `HALLUCIN_ENABLE_PRIVACY_HEADERS` | `1` | Enable no-store/no-cache headers |
+| `HALLUCIN_MAX_CONTEXT_CHUNKS` | `240` | Max context chunks for scoring |
+| `HALLUCIN_TOP_MATCH_CANDIDATES` | `3` | Top-N semantic candidates per claim |
+| `HALLUCIN_USE_SPACY` | `0` | Use spaCy for sentence splitting |
+
+---
 
 ## Deploy On Vercel
 
-This repository is now configured for Vercel deployment (`vercel.json` + `api/index.py`).
-
-```bash
-vercel
-```
-
-Optional production deploy:
+This project includes `vercel.json` and `api/index.py` for zero-config Vercel deployment.
 
 ```bash
 vercel --prod
 ```
 
-If you previously deployed this app on Render, disable or delete that Render service in the Render dashboard so only the Vercel deployment stays active.
+Health check: `GET /health`
 
-## Run Tests
+> **Note:** Deploy from the `Hallucin` directory, or set the project root to `Hallucin` in the Vercel dashboard.
+
+---
+
+## Test
 
 ```bash
 pytest -q
 ```
 
-## Project Layout
-
-```text
-hallucination_detector/
-  __init__.py
-  __main__.py
-  detector.py
-  scorer.py
-  splitter.py
-  webapp.py
-  templates/
-    index.html
-  static/
-    style.css
-    app.js
-api/
-  index.py
-tests/
-  test_detector.py
-  test_webapp.py
-vercel.json
-requirements.txt
 ```
+29 passed in 0.82s
+```
+
+Tests cover:
+- Claim splitting (regex and spaCy fallback)
+- Context chunking and deduplication
+- Overall scoring aggregation
+- End-to-end detection with grounded, hallucinated, and partial responses
+- Web API (JSON payload, file uploads, validation, rate limiting)
+- Security headers (enable/disable)
+- Vercel entrypoint health check
+
+---
+
+## Project Structure
+
+```
+Hallucin/
+├── hallucination_detector/
+│   ├── __init__.py          # Public API exports
+│   ├── __main__.py          # CLI entrypoint
+│   ├── detector.py          # detect() orchestration
+│   ├── scorer.py            # Claim scoring engine
+│   ├── splitter.py          # Claim extraction
+│   ├── webapp.py            # Flask application
+│   ├── static/
+│   │   ├── style.css        # UI styles
+│   │   └── app.js           # Frontend logic
+│   └── templates/
+│       └── index.html       # Web interface
+├── api/
+│   └── index.py             # Vercel entrypoint
+├── tests/                   # Unit tests
+├── examples/                # Usage examples
+├── pyproject.toml           # Package metadata
+├── requirements.txt         # Runtime dependencies
+├── CHANGELOG.md             # Release history
+├── CONTRIBUTING.md          # Contribution guide
+├── LICENSE                  # MIT License
+└── README.md
+```
+
+---
+
+## Security
+
+- **No file persistence** — uploaded files are processed in memory and never written to disk.
+- **Security headers** — `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, `Cache-Control: no-store`.
+- **Rate limiting** — sliding window per-client IP with configurable limits.
+- **Upload validation** — extension allowlist, binary content rejection, size limits.
+- **Input validation** — text length enforcement on both client and server sides.
+
+---
+
+## License
+
+[MIT](LICENSE) — see [LICENSE](LICENSE) for details.

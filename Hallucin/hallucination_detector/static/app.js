@@ -1,224 +1,275 @@
-/* ─────────────────────────────────────────────
-   Hallucin Studio — App Logic
-   ───────────────────────────────────────────── */
-
 (() => {
   "use strict";
 
-  // ── DOM handles ──
-  const form         = document.getElementById("analyze-form");
-  const runBtn       = document.getElementById("run-btn");
-  const textMode     = document.getElementById("text-mode");
-  const filesMode    = document.getElementById("files-mode");
-  const modeToggle   = document.getElementById("mode-toggle");
-  const modeButtons  = [...document.querySelectorAll(".mode-toggle__btn")];
+  const form = document.getElementById("analyze-form");
+  const runBtn = document.getElementById("run-btn");
+  const textMode = document.getElementById("text-mode");
+  const filesMode = document.getElementById("files-mode");
+  const modeButtons = [...document.querySelectorAll(".mode-tabs__button")];
+  const formStatus = document.getElementById("form-status");
 
-  const scoreValue   = document.getElementById("score-value");
-  const scoreLabel   = document.getElementById("score-label");
-  const runtime      = document.getElementById("runtime");
-  const claims       = document.getElementById("claims");
-  const gaugeFill    = document.getElementById("gauge-fill");
+  const contextInput = document.getElementById("context");
+  const responseInput = document.getElementById("response");
+  const contextCount = document.getElementById("context-count");
+  const responseCount = document.getElementById("response-count");
 
-  const statSupported   = document.getElementById("stat-supported");
-  const statPartial     = document.getElementById("stat-partial");
+  const scoreValue = document.getElementById("score-value");
+  const scoreLabel = document.getElementById("score-label");
+  const runtime = document.getElementById("runtime");
+  const claims = document.getElementById("claims");
+  const gaugeFill = document.getElementById("gauge-fill");
+
+  const statSupported = document.getElementById("stat-supported");
+  const statPartial = document.getElementById("stat-partial");
   const statUnsupported = document.getElementById("stat-unsupported");
 
+  const maxTextChars = Number(form.dataset.maxTextChars || 0);
+  const circumference = 2 * Math.PI * 52;
   let currentMode = "text";
 
-  // ── Inject SVG gradient for gauge (needs to live inside <svg>) ──
-  const gaugeRingSvg = document.querySelector(".gauge__ring");
-  if (gaugeRingSvg) {
-    const defs = document.createElementNS("http://www.w3.org/2000/svg", "defs");
-    defs.innerHTML = `
-      <linearGradient id="gauge-gradient" x1="0" y1="0" x2="1" y2="1">
-        <stop offset="0%" stop-color="#2dd4bf"/>
-        <stop offset="100%" stop-color="#0284c7"/>
-      </linearGradient>
-    `;
-    gaugeRingSvg.prepend(defs);
+  gaugeFill.style.strokeDasharray = String(circumference);
+  setGauge(0);
+  updateCounts();
+
+  for (const input of [contextInput, responseInput]) {
+    input.addEventListener("input", updateCounts);
   }
 
-  // ── Mode toggle ──
   for (const button of modeButtons) {
     button.addEventListener("click", () => {
       currentMode = button.dataset.mode;
-      modeButtons.forEach(btn => btn.classList.toggle("active", btn === button));
-      modeToggle.dataset.active = currentMode;
+      for (const item of modeButtons) {
+        const isActive = item === button;
+        item.classList.toggle("active", isActive);
+        item.setAttribute("aria-selected", String(isActive));
+      }
       textMode.classList.toggle("hidden", currentMode !== "text");
       filesMode.classList.toggle("hidden", currentMode !== "files");
+      formStatus.textContent = "";
     });
   }
 
-  // ── File dropzone interaction ──
-  document.querySelectorAll(".dropzone").forEach(zone => {
+  document.querySelectorAll(".dropzone").forEach((zone) => {
     const input = zone.querySelector("input[type=file]");
-    const hint  = zone.querySelector(".dropzone__hint");
+    const hint = zone.querySelector(".dropzone__hint");
 
-    if (input) {
-      input.addEventListener("change", () => {
-        if (input.files.length) {
-          hint.textContent = input.files[0].name;
-          zone.classList.add("has-file");
-        } else {
-          hint.textContent = "Drop or click to upload";
-          zone.classList.remove("has-file");
-        }
-      });
-    }
+    input.addEventListener("change", () => {
+      const file = input.files && input.files[0];
+      hint.textContent = file ? file.name : "Drop or choose a file";
+      zone.classList.toggle("has-file", Boolean(file));
+    });
 
-    zone.addEventListener("dragover", e => { e.preventDefault(); zone.classList.add("dragover"); });
-    zone.addEventListener("dragleave", ()=> { zone.classList.remove("dragover"); });
-    zone.addEventListener("drop", e => {
-      e.preventDefault();
+    zone.addEventListener("dragover", (event) => {
+      event.preventDefault();
+      zone.classList.add("dragover");
+    });
+    zone.addEventListener("dragleave", () => zone.classList.remove("dragover"));
+    zone.addEventListener("drop", (event) => {
+      event.preventDefault();
       zone.classList.remove("dragover");
-      if (input && e.dataTransfer.files.length) {
-        input.files = e.dataTransfer.files;
+      if (event.dataTransfer.files.length) {
+        input.files = event.dataTransfer.files;
         input.dispatchEvent(new Event("change"));
       }
     });
   });
 
-  // ── Form submit ──
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
+    formStatus.textContent = "";
+
+    const validationError = validateInputs();
+    if (validationError) {
+      showError(validationError);
+      return;
+    }
 
     runBtn.disabled = true;
     runBtn.classList.add("loading");
     clearResults();
 
     try {
-      let resp;
-      if (currentMode === "files") {
-        const formData = new FormData(form);
-        formData.append("model_name", "local");
-        resp = await fetch("/api/analyze", {
-          method: "POST",
-          body: formData,
-        });
-      } else {
-        const payload = {
-          context: document.getElementById("context").value,
-          response: document.getElementById("response").value,
-          model_name: "local",
-        };
-        resp = await fetch("/api/analyze", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
-        });
-      }
+      const response = await fetch("/api/analyze", buildRequest());
+      const data = await parseJsonResponse(response);
 
-      const raw = await resp.text();
-      let data = null;
-      try {
-        data = JSON.parse(raw);
-      } catch {
-        const snippet = raw.slice(0, 140).replace(/\s+/g, " ").trim();
-        throw new Error(`Server returned non-JSON (${resp.status}). ${snippet}`);
-      }
-
-      if (!resp.ok) {
-        throw new Error(data.error || `Analysis failed (${resp.status})`);
+      if (!response.ok) {
+        throw new Error(data.error || `Analysis failed (${response.status})`);
       }
 
       renderResult(data);
     } catch (error) {
-      scoreLabel.textContent = error.message;
-      scoreValue.textContent = "--";
-      setGauge(0);
+      showError(error.message || "Analysis failed.");
     } finally {
       runBtn.disabled = false;
       runBtn.classList.remove("loading");
     }
   });
 
-  // ── Render result ──
-  function renderResult(data) {
-    const score = Number(data.score);
+  function buildRequest() {
+    if (currentMode === "files") {
+      const formData = new FormData(form);
+      formData.append("model_name", "local");
+      return { method: "POST", body: formData };
+    }
 
-    // animate score counter
+    return {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        context: contextInput.value,
+        response: responseInput.value,
+        model_name: "local",
+      }),
+    };
+  }
+
+  async function parseJsonResponse(response) {
+    const raw = await response.text();
+    try {
+      return JSON.parse(raw);
+    } catch {
+      const snippet = raw.slice(0, 140).replace(/\s+/g, " ").trim();
+      throw new Error(`Server returned non-JSON (${response.status}). ${snippet}`);
+    }
+  }
+
+  function validateInputs() {
+    if (currentMode === "text") {
+      if (!contextInput.value.trim() || !responseInput.value.trim()) {
+        return "Source context and model response are required.";
+      }
+      if (maxTextChars && contextInput.value.length > maxTextChars) {
+        return `Source context exceeds ${maxTextChars} characters.`;
+      }
+      if (maxTextChars && responseInput.value.length > maxTextChars) {
+        return `Model response exceeds ${maxTextChars} characters.`;
+      }
+      return "";
+    }
+
+    const contextFile = document.getElementById("context_file").files[0];
+    const responseFile = document.getElementById("response_file").files[0];
+    if (!contextFile || !responseFile) {
+      return "Choose both a context file and a response file.";
+    }
+    return "";
+  }
+
+  function renderResult(data) {
+    const score = Number(data.score || 0);
+
     animateCounter(scoreValue, score, 2);
     scoreLabel.textContent = classify(score);
-    runtime.textContent = `${Number(data.elapsed_ms).toFixed(1)} ms`;
-
+    runtime.textContent = `${Number(data.elapsed_ms || 0).toFixed(1)} ms`;
     setGauge(score);
 
-    // stat counters
-    animateCounter(statSupported,   data.counts.supported, 0);
-    animateCounter(statPartial,     data.counts.partial, 0);
-    animateCounter(statUnsupported, data.counts.unsupported, 0);
+    animateCounter(statSupported, data.counts.supported || 0, 0);
+    animateCounter(statPartial, data.counts.partial || 0, 0);
+    animateCounter(statUnsupported, data.counts.unsupported || 0, 0);
 
-    // render claims with stagger
-    data.claims.forEach((item, i) => {
+    claims.innerHTML = "";
+    if (!Array.isArray(data.claims) || data.claims.length === 0) {
+      claims.append(emptyState("No claims were detected in the response."));
+      return;
+    }
+
+    data.claims.forEach((item, index) => {
       const card = document.createElement("article");
       card.className = `claim ${item.label}`;
-      card.style.animationDelay = `${i * 60}ms`;
-      card.innerHTML = `
-        <div class="claim__text">${escapeHtml(item.claim)}</div>
-        <div class="claim__meta">
-          <span class="claim__badge">${item.label}</span>
-          <span>sim ${Number(item.score).toFixed(2)}</span>
-          <span>· best: ${escapeHtml(truncate(item.best_match, 80))}</span>
-        </div>
-      `;
+      card.style.animationDelay = `${index * 35}ms`;
+
+      const text = document.createElement("p");
+      text.className = "claim__text";
+      text.textContent = item.claim;
+
+      const meta = document.createElement("div");
+      meta.className = "claim__meta";
+
+      const label = document.createElement("span");
+      label.className = "claim__badge";
+      label.textContent = item.label;
+
+      const scoreItem = document.createElement("span");
+      scoreItem.textContent = `similarity ${Number(item.score || 0).toFixed(2)}`;
+
+      const best = document.createElement("span");
+      best.className = "claim__match";
+      best.textContent = `best match: ${truncate(item.best_match || "", 110)}`;
+
+      meta.append(label, scoreItem, best);
+      card.append(text, meta);
       claims.append(card);
     });
   }
 
-  // ── Score gauge ──
-  const CIRCUMFERENCE = 2 * Math.PI * 62; // r=62
-
-  function setGauge(pct /* 0-1 */) {
-    const offset = CIRCUMFERENCE * (1 - Math.min(1, Math.max(0, pct)));
-    gaugeFill.style.strokeDashoffset = offset;
-  }
-
-  // ── Animated counter ──
-  function animateCounter(el, target, decimals) {
-    const duration = 800;
-    const start    = performance.now();
-    const from     = 0;
-
-    function tick(now) {
-      const t = Math.min((now - start) / duration, 1);
-      const ease = 1 - Math.pow(1 - t, 3);
-      const val = from + (target - from) * ease;
-      el.textContent = val.toFixed(decimals);
-      if (t < 1) requestAnimationFrame(tick);
-    }
-    requestAnimationFrame(tick);
-  }
-
-  // ── Classify score ──
-  function classify(score) {
-    if (score >= 0.75) return "Strong grounding";
-    if (score >= 0.5)  return "Mixed grounding";
-    return "Low grounding";
-  }
-
-  // ── Clear results ──
-  function clearResults() {
+  function showError(message) {
+    formStatus.textContent = message;
     claims.innerHTML = "";
-    scoreLabel.textContent = "Analyzing…";
-    scoreValue.textContent = "···";
-    runtime.textContent = "— ms";
-    statSupported.textContent   = "0";
-    statPartial.textContent     = "0";
+    claims.append(emptyState(message));
+    scoreLabel.textContent = "Needs attention";
+    scoreValue.textContent = "--";
+    runtime.textContent = "Not run";
+    statSupported.textContent = "0";
+    statPartial.textContent = "0";
     statUnsupported.textContent = "0";
     setGauge(0);
   }
 
-  // ── Helpers ──
-  function escapeHtml(value) {
-    return String(value)
-      .replaceAll("&", "&amp;")
-      .replaceAll("<", "&lt;")
-      .replaceAll(">", "&gt;");
+  function clearResults() {
+    claims.innerHTML = "";
+    claims.append(emptyState("Analyzing claims..."));
+    scoreLabel.textContent = "Analyzing";
+    scoreValue.textContent = "...";
+    runtime.textContent = "Running";
+    statSupported.textContent = "0";
+    statPartial.textContent = "0";
+    statUnsupported.textContent = "0";
+    setGauge(0);
   }
 
-  function truncate(str, max) {
-    if (str.length <= max) return str;
-    return str.slice(0, max) + "…";
+  function emptyState(text) {
+    const element = document.createElement("div");
+    element.className = "empty-result";
+    element.textContent = text;
+    return element;
   }
 
+  function setGauge(value) {
+    const bounded = Math.min(1, Math.max(0, Number(value) || 0));
+    gaugeFill.style.strokeDashoffset = String(circumference * (1 - bounded));
+  }
+
+  function animateCounter(element, target, decimals) {
+    const duration = 520;
+    const start = performance.now();
+    const from = Number(element.textContent) || 0;
+
+    function tick(now) {
+      const progress = Math.min((now - start) / duration, 1);
+      const eased = 1 - Math.pow(1 - progress, 3);
+      const value = from + (Number(target) - from) * eased;
+      element.textContent = value.toFixed(decimals);
+      if (progress < 1) requestAnimationFrame(tick);
+    }
+
+    requestAnimationFrame(tick);
+  }
+
+  function classify(score) {
+    if (score >= 0.75) return "Strong grounding";
+    if (score >= 0.5) return "Mixed grounding";
+    return "Low grounding";
+  }
+
+  function updateCounts() {
+    contextCount.textContent = String(contextInput.value.length);
+    responseCount.textContent = String(responseInput.value.length);
+    contextCount.classList.toggle("over-limit", maxTextChars && contextInput.value.length > maxTextChars);
+    responseCount.classList.toggle("over-limit", maxTextChars && responseInput.value.length > maxTextChars);
+  }
+
+  function truncate(value, max) {
+    const text = String(value);
+    return text.length <= max ? text : `${text.slice(0, max)}...`;
+  }
 })();

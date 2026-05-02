@@ -199,6 +199,9 @@ def create_app(config: dict[str, Any] | None = None) -> Flask:
             _validate_upload_file(response_file, app.config["UPLOAD_ALLOWED_EXTENSIONS"])
             response = _read_upload_text(response_file, app.config["MAX_TEXT_CHARS"])
 
+        _validate_text_length("Context", context, app.config["MAX_TEXT_CHARS"])
+        _validate_text_length("Response", response, app.config["MAX_TEXT_CHARS"])
+
         if not context or not response:
             return (
                 jsonify(
@@ -313,6 +316,11 @@ def _read_upload_text(file_storage, max_text_chars: int) -> str:
         chunks.append(final_text)
 
     return "".join(chunks).strip()
+
+
+def _validate_text_length(label: str, value: str, max_text_chars: int) -> None:
+    if value and len(value) > max_text_chars:
+        raise ValueError(f"{label} exceeds max length ({max_text_chars} chars).")
 
 
 def _get_client_identifier() -> str:
