@@ -1,2 +1,0 @@
-[console_scripts]
-hallucin = hallucination_detector.__main__:main
