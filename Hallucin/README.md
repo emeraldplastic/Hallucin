@@ -159,6 +159,8 @@ All settings are optional and configured via environment variables.
 | `HALLUCIN_MAX_CONTEXT_CHUNKS` | `240` | Max context chunks for scoring |
 | `HALLUCIN_TOP_MATCH_CANDIDATES` | `3` | Top-N semantic candidates per claim |
 | `HALLUCIN_USE_SPACY` | `0` | Use spaCy for sentence splitting |
+| `HALLUCIN_API_KEYS` | (None) | Comma-separated allowed API keys |
+| `HALLUCIN_REQUEST_TIMEOUT` | `30` | Request timeout in seconds |
 
 ---
 
@@ -229,11 +231,22 @@ Hallucin/
 
 ## Security
 
-- **No file persistence** — uploaded files are processed in memory and never written to disk.
-- **Security headers** — `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, `Cache-Control: no-store`.
-- **Rate limiting** — sliding window per-client IP with configurable limits.
-- **Upload validation** — extension allowlist, binary content rejection, size limits.
-- **Input validation** — text length enforcement on both client and server sides.
+Hallucin Studio is designed with a strong security posture suitable for production deployments:
+
+- **Input Sanitization** — All text inputs are sanitized using `bleach` to prevent XSS and injection attacks.
+- **CSRF Protection** — API endpoints enforcing state-changing operations require a synchronized `X-CSRF-Token` header.
+- **Authentication** — Optional API key enforcement via the `X-API-Key` or `Authorization` headers.
+- **Security Headers** — Enforces strict `Content-Security-Policy`, `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: strict-origin-when-cross-origin`, and `Cache-Control: no-store`.
+- **DoS Protection** — Process execution timeouts, in-memory rate limiting (sliding window), and algorithmic limits on input dimensions and claims generation prevent resource exhaustion.
+- **No File Persistence** — Uploaded files are processed strictly in memory and never written to disk.
+- **Upload Validation** — Strict extension allowlists, binary content rejection, and payload size limits are enforced.
+- **Structured Logging** — Comprehensive JSON-formatted audit trails for authentication failures, CSRF rejections, and rate limits.
+
+---
+
+## Credits
+
+Special thanks to **Rume AI** for inspiring the production-grade security architecture, including the robust API key validation, CSRF implementations, configuration enforcement, and structured JSON observability patterns used in this project.
 
 ---
 

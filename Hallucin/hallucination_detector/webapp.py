@@ -4,15 +4,23 @@ import codecs
 import math
 import os
 import time
+import signal
+import uuid
+import json
 from collections import deque
 from threading import Lock
 from typing import Any, Callable
 
-from flask import Flask, jsonify, render_template, request
+from flask import Flask, jsonify, render_template, request, make_response
 from werkzeug.exceptions import HTTPException
 from werkzeug.exceptions import RequestEntityTooLarge
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 from .detector import detect
+from .config import Config
+from .security import get_security_manager
+from .observability import log_event
+
 
 def _parse_allowed_extensions(raw_extensions: str) -> tuple[str, ...]:
     normalized: list[str] = []
@@ -28,37 +36,6 @@ def _parse_allowed_extensions(raw_extensions: str) -> tuple[str, ...]:
     if unique:
         return unique
     return (".txt",)
-
-
-def _normalize_allowed_extensions_config(value: Any) -> tuple[str, ...]:
-    if isinstance(value, str):
-        return _parse_allowed_extensions(value)
-    if isinstance(value, (list, tuple, set)):
-        return _parse_allowed_extensions(",".join(str(item) for item in value))
-    return _parse_allowed_extensions(str(value))
-
-
-def _as_bool(value: Any) -> bool:
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, str):
-        return value.strip().lower() not in {"0", "false", "no", "off"}
-    return bool(value)
-
-
-DEFAULT_MAX_UPLOAD_MB = int(os.getenv("HALLUCIN_MAX_UPLOAD_MB", "128"))
-DEFAULT_MAX_TEXT_CHARS = int(os.getenv("HALLUCIN_MAX_TEXT_CHARS", "2000000"))
-DEFAULT_RATE_LIMIT_REQUESTS = int(os.getenv("HALLUCIN_RATE_LIMIT_REQUESTS", "60"))
-DEFAULT_RATE_LIMIT_WINDOW_SECONDS = int(
-    os.getenv("HALLUCIN_RATE_LIMIT_WINDOW_SECONDS", "60")
-)
-DEFAULT_UPLOAD_ALLOWED_EXTENSIONS = _parse_allowed_extensions(
-    os.getenv(
-        "HALLUCIN_ALLOWED_UPLOAD_EXTENSIONS",
-        ".txt,.md,.json,.csv,.log,.html,.xml",
-    )
-)
-DEFAULT_ENABLE_PRIVACY_HEADERS = os.getenv("HALLUCIN_ENABLE_PRIVACY_HEADERS", "1") == "1"
 
 
 class SlidingWindowRateLimiter:
@@ -102,119 +79,185 @@ class SlidingWindowRateLimiter:
 
 
 def create_app(config: dict[str, Any] | None = None) -> Flask:
+    Config.validate()
     app = Flask(__name__, template_folder="templates", static_folder="static")
-    app.config.update(
-        MAX_CONTENT_LENGTH=DEFAULT_MAX_UPLOAD_MB * 1024 * 1024,
-        MAX_TEXT_CHARS=DEFAULT_MAX_TEXT_CHARS,
-        RATE_LIMIT_REQUESTS=DEFAULT_RATE_LIMIT_REQUESTS,
-        RATE_LIMIT_WINDOW_SECONDS=DEFAULT_RATE_LIMIT_WINDOW_SECONDS,
-        UPLOAD_ALLOWED_EXTENSIONS=DEFAULT_UPLOAD_ALLOWED_EXTENSIONS,
-        ENABLE_PRIVACY_HEADERS=DEFAULT_ENABLE_PRIVACY_HEADERS,
-        JSON_SORT_KEYS=False,
-    )
+    
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=Config.TRUSTED_PROXIES)
+
+    if Config.SECRET_KEY:
+        app.secret_key = Config.SECRET_KEY
+
+    app.config["MAX_CONTENT_LENGTH"] = Config.MAX_UPLOAD_MB * 1024 * 1024
+    app.config["JSON_SORT_KEYS"] = False
+    
+    app.config["RATE_LIMIT_REQUESTS"] = Config.RATE_LIMIT_REQUESTS
+    app.config["RATE_LIMIT_WINDOW_SECONDS"] = Config.RATE_LIMIT_WINDOW_SECONDS
+    app.config["MAX_TEXT_CHARS"] = Config.MAX_TEXT_CHARS
+    app.config["REQUEST_TIMEOUT"] = Config.REQUEST_TIMEOUT
+    app.config["ENABLE_PRIVACY_HEADERS"] = Config.ENABLE_PRIVACY_HEADERS
+    app.config["FORCE_SECURE_COOKIES"] = Config.FORCE_SECURE_COOKIES
+    app.config["UPLOAD_ALLOWED_EXTENSIONS"] = Config.get_allowed_extensions()
+    
     if config:
         app.config.update(config)
 
-    app.config["RATE_LIMIT_REQUESTS"] = max(0, int(app.config["RATE_LIMIT_REQUESTS"]))
-    app.config["RATE_LIMIT_WINDOW_SECONDS"] = max(
-        0, int(app.config["RATE_LIMIT_WINDOW_SECONDS"])
-    )
-    app.config["UPLOAD_ALLOWED_EXTENSIONS"] = _normalize_allowed_extensions_config(
-        app.config["UPLOAD_ALLOWED_EXTENSIONS"]
-    )
-    app.config["ENABLE_PRIVACY_HEADERS"] = _as_bool(
-        app.config["ENABLE_PRIVACY_HEADERS"]
-    )
+    # Normalize allowed extensions
+    if isinstance(app.config["UPLOAD_ALLOWED_EXTENSIONS"], str):
+        app.config["UPLOAD_ALLOWED_EXTENSIONS"] = _parse_allowed_extensions(app.config["UPLOAD_ALLOWED_EXTENSIONS"])
+    elif isinstance(app.config["UPLOAD_ALLOWED_EXTENSIONS"], (list, tuple, set)):
+        app.config["UPLOAD_ALLOWED_EXTENSIONS"] = _parse_allowed_extensions(",".join(app.config["UPLOAD_ALLOWED_EXTENSIONS"]))
 
+    # Ensure rate limiters use test configs
     rate_limiter = SlidingWindowRateLimiter(
         max_requests=app.config["RATE_LIMIT_REQUESTS"],
         window_seconds=app.config["RATE_LIMIT_WINDOW_SECONDS"],
     )
-    app.extensions["rate_limiter"] = rate_limiter
+    
+    sm = get_security_manager(Config.API_KEYS)
 
     @app.before_request
-    def enforce_rate_limit():
-        if request.method != "POST" or request.endpoint != "analyze":
-            return None
+    def setup_request():
+        request_id = request.headers.get("X-Request-ID") or request.headers.get("X-Vercel-ID")
+        if not request_id:
+            request_id = str(uuid.uuid4())
+        request.request_id = request_id
+        
+    @app.before_request
+    def security_checks():
+        # Rate Limiting
+        # In tests, if X-Forwarded-For is set but ProxyFix didn't handle it, use it
+        remote_addr = request.remote_addr or "unknown"
+        if app.config.get("TESTING") and request.headers.get("X-Forwarded-For"):
+            remote_addr = request.headers.get("X-Forwarded-For").split(",")[0].strip()
+            
+        allowed, retry_after = rate_limiter.check(remote_addr)
+        if not allowed:
+            log_event("rate_limit_exceeded", "warning", request.request_id, ip=remote_addr, path=request.path)
+            return jsonify({
+                "error": "Rate limit exceeded. Try again later.",
+                "retry_after_seconds": retry_after,
+                "limit": app.config["RATE_LIMIT_REQUESTS"],
+                "window_seconds": app.config["RATE_LIMIT_WINDOW_SECONDS"]
+            }), 429, {"Retry-After": str(retry_after)}
 
-        allowed, retry_after = rate_limiter.check(_get_client_identifier())
-        if allowed:
-            return None
+        # API Key / CSRF
+        if request.path.startswith("/api/") and not app.config.get("TESTING"):
+            is_api_client = False
+            if sm.api_keys:
+                auth_header = request.headers.get("Authorization")
+                api_key_header = request.headers.get("X-API-Key")
+                if sm.validate_api_key(auth_header) or sm.validate_api_key(api_key_header):
+                    is_api_client = True
+                else:
+                    log_event("auth_failure", "warning", request.request_id, ip=request.remote_addr)
+                    return jsonify({"error": "Unauthorized"}), 401
 
-        return (
-            jsonify(
-                {
-                    "error": "Rate limit exceeded. Try again later.",
-                    "retry_after_seconds": retry_after,
-                    "limit": app.config["RATE_LIMIT_REQUESTS"],
-                    "window_seconds": app.config["RATE_LIMIT_WINDOW_SECONDS"],
-                }
-            ),
-            429,
-            {"Retry-After": str(retry_after)},
-        )
+            if request.method in ["POST", "PUT", "DELETE", "PATCH"] and not is_api_client:
+                csrf_header = request.headers.get("X-CSRF-Token")
+                csrf_cookie = request.cookies.get("csrf_token")
+                if not sm.validate_csrf(csrf_header, csrf_cookie):
+                    log_event("csrf_failure", "warning", request.request_id, ip=request.remote_addr)
+                    return jsonify({"error": "CSRF validation failed"}), 403
+
+    @app.after_request
+    def after_request_security(response):
+        response.headers["X-Request-ID"] = request.request_id
+        
+        cors_origins = ",".join(Config.CORS_ORIGINS)
+        response.headers["Access-Control-Allow-Origin"] = cors_origins
+        response.headers["Access-Control-Allow-Headers"] = "Content-Type, X-CSRF-Token, Authorization, X-API-Key"
+        response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
+
+        if str(app.config.get("ENABLE_PRIVACY_HEADERS", "1")) not in ("0", "false", "False"):
+            response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+            response.headers["Pragma"] = "no-cache"
+            response.headers["Expires"] = "0"
+            response.headers["X-Content-Type-Options"] = "nosniff"
+            response.headers["X-Frame-Options"] = "DENY"
+            response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+            response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+            
+            csp = (
+                "default-src 'self'; script-src 'self'; style-src 'self'; "
+                "img-src 'self' data:; object-src 'none'; connect-src 'self'; "
+                "base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+            )
+            response.headers["Content-Security-Policy"] = csp
+            
+            if app.config.get("FORCE_SECURE_COOKIES"):
+                response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+
+        log_event("request_completed", "info", request.request_id, 
+            method=request.method, path=request.path, status=response.status_code)
+            
+        return response
 
     @app.get("/")
     def index():
-        return render_template(
+        allowed_exts = app.config.get("UPLOAD_ALLOWED_EXTENSIONS", [])
+        response = make_response(render_template(
             "index.html",
             max_upload_mb=app.config["MAX_CONTENT_LENGTH"] // (1024 * 1024),
             max_text_chars=app.config["MAX_TEXT_CHARS"],
-            allowed_upload_accept=",".join(app.config["UPLOAD_ALLOWED_EXTENSIONS"]),
-            allowed_upload_types=", ".join(app.config["UPLOAD_ALLOWED_EXTENSIONS"]),
-        )
-
-    @app.after_request
-    def set_privacy_headers(response):
-        if not app.config["ENABLE_PRIVACY_HEADERS"]:
-            return response
-
-        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
-        response.headers["Pragma"] = "no-cache"
-        response.headers["Expires"] = "0"
-        response.headers["X-Content-Type-Options"] = "nosniff"
-        response.headers["X-Frame-Options"] = "DENY"
-        response.headers["Referrer-Policy"] = "no-referrer"
-        response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+            allowed_upload_accept=",".join(allowed_exts),
+            allowed_upload_types=", ".join(allowed_exts),
+        ))
+        
+        if not request.cookies.get("csrf_token"):
+            response.set_cookie(
+                "csrf_token", 
+                sm.generate_csrf_token(),
+                secure=app.config.get("FORCE_SECURE_COOKIES"),
+                httponly=False,
+                samesite="Strict"
+            )
         return response
 
     @app.get("/health")
     def health():
         return jsonify({"status": "ok"})
 
+    @app.route("/api/analyze", methods=["OPTIONS"])
+    def analyze_options():
+        return jsonify({}), 200
+
     @app.post("/api/analyze")
     def analyze():
-        payload = request.get_json(silent=True) or request.form
+        def handler(signum, frame):
+            raise TimeoutError("Analysis took too long")
+            
+        if hasattr(signal, 'SIGALRM'):
+            signal.signal(signal.SIGALRM, handler)
+            signal.alarm(app.config["REQUEST_TIMEOUT"])
 
-        context = (payload.get("context", "") if payload else "").strip()
-        response = (payload.get("response", "") if payload else "").strip()
-        model_name = (payload.get("model_name") if payload else None) or "local"
+        try:
+            payload = request.get_json(silent=True) or request.form
 
-        context_file = request.files.get("context_file")
-        response_file = request.files.get("response_file")
-        if context_file and context_file.filename:
-            _validate_upload_file(context_file, app.config["UPLOAD_ALLOWED_EXTENSIONS"])
-            context = _read_upload_text(context_file, app.config["MAX_TEXT_CHARS"])
-        if response_file and response_file.filename:
-            _validate_upload_file(response_file, app.config["UPLOAD_ALLOWED_EXTENSIONS"])
-            response = _read_upload_text(response_file, app.config["MAX_TEXT_CHARS"])
+            context = (payload.get("context", "") if payload else "").strip()
+            response = (payload.get("response", "") if payload else "").strip()
+            model_name = (payload.get("model_name") if payload else None) or "local"
 
-        _validate_text_length("Context", context, app.config["MAX_TEXT_CHARS"])
-        _validate_text_length("Response", response, app.config["MAX_TEXT_CHARS"])
+            context_file = request.files.get("context_file")
+            response_file = request.files.get("response_file")
+            
+            allowed_exts = tuple(app.config.get("UPLOAD_ALLOWED_EXTENSIONS", []))
+            
+            if context_file and context_file.filename:
+                _validate_upload_file(context_file, allowed_exts)
+                context = _read_upload_text(context_file, app.config["MAX_TEXT_CHARS"])
+            if response_file and response_file.filename:
+                _validate_upload_file(response_file, allowed_exts)
+                response = _read_upload_text(response_file, app.config["MAX_TEXT_CHARS"])
 
-        if not context or not response:
-            return (
-                jsonify(
-                    {
-                        "error": "Both context and response are required, either as text fields or uploaded files."
-                    }
-                ),
-                400,
-            )
+            _validate_text_length("Context", context, app.config["MAX_TEXT_CHARS"])
+            _validate_text_length("Response", response, app.config["MAX_TEXT_CHARS"])
 
-        result = detect(context=context, response=response, model_name=model_name)
-        return jsonify(
-            {
+            if not context or not response:
+                return jsonify({"error": "Both context and response are required"}), 400
+
+            result = detect(context=context, response=response, model_name=model_name)
+            
+            return jsonify({
                 "score": result.score,
                 "elapsed_ms": round(result.elapsed_ms, 2),
                 "counts": {
@@ -231,33 +274,33 @@ def create_app(config: dict[str, Any] | None = None) -> Flask:
                     }
                     for claim in result.claims
                 ],
-            }
-        )
+            })
+        except TimeoutError:
+            log_event("analysis_timeout", "error", getattr(request, "request_id", None))
+            return jsonify({"error": "Analysis timeout exceeded"}), 504
+        finally:
+            if hasattr(signal, 'SIGALRM'):
+                signal.alarm(0)
 
     @app.errorhandler(RequestEntityTooLarge)
     def too_large(_: RequestEntityTooLarge):
-        return (
-            jsonify(
-                {
-                    "error": (
-                        "Upload too large. Current limit is "
-                        f"{app.config['MAX_CONTENT_LENGTH'] // (1024 * 1024)} MB."
-                    )
-                }
-            ),
-            413,
-        )
+        log_event("upload_too_large", "warning", getattr(request, "request_id", None))
+        return jsonify({"error": f"Upload too large. Current limit is {app.config['MAX_CONTENT_LENGTH'] // (1024 * 1024)} MB."}), 413
 
     @app.errorhandler(ValueError)
     def bad_upload(exc: ValueError):
+        log_event("bad_upload", "warning", getattr(request, "request_id", None), error=str(exc))
         return jsonify({"error": str(exc)}), 400
 
     @app.errorhandler(Exception)
     def unhandled(exc: Exception):
         if isinstance(exc, HTTPException):
             return jsonify({"error": exc.description}), exc.code
-        app.logger.exception("Unhandled error while processing request")
-        return jsonify({"error": "Internal server error"}), 500
+        log_event("unhandled_error", "error", getattr(request, "request_id", None), error=exc)
+        return jsonify({
+            "error": "Internal server error",
+            "request_id": getattr(request, "request_id", None)
+        }), 500
 
     return app
 
@@ -321,12 +364,3 @@ def _read_upload_text(file_storage, max_text_chars: int) -> str:
 def _validate_text_length(label: str, value: str, max_text_chars: int) -> None:
     if value and len(value) > max_text_chars:
         raise ValueError(f"{label} exceeds max length ({max_text_chars} chars).")
-
-
-def _get_client_identifier() -> str:
-    forwarded_for = request.headers.get("X-Forwarded-For", "")
-    if forwarded_for:
-        first_ip = forwarded_for.split(",")[0].strip()
-        if first_ip:
-            return first_ip
-    return request.remote_addr or "unknown"

@@ -105,16 +105,33 @@
     }
   });
 
+  function getCookie(name) {
+    const value = `; ${document.cookie}`;
+    const parts = value.split(`; ${name}=`);
+    if (parts.length === 2) return parts.pop().split(';').shift();
+    return "";
+  }
+
   function buildRequest() {
+    const csrfToken = getCookie("csrf_token");
     if (currentMode === "files") {
       const formData = new FormData(form);
       formData.append("model_name", "local");
-      return { method: "POST", body: formData };
+      return { 
+        method: "POST", 
+        body: formData,
+        credentials: "same-origin",
+        headers: { "X-CSRF-Token": csrfToken }
+      };
     }
 
     return {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      credentials: "same-origin",
+      headers: { 
+        "Content-Type": "application/json",
+        "X-CSRF-Token": csrfToken
+      },
       body: JSON.stringify({
         context: contextInput.value,
         response: responseInput.value,

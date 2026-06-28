@@ -1,11 +1,12 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from dataclasses import dataclass, field
 from time import perf_counter
 
 from .scorer import ClaimResult, overall_score, score_claims
 from .splitter import split_claims_llm, split_claims_simple
-
+from .config import Config
+from .security import get_security_manager
 
 @dataclass
 class DetectionResult:
@@ -49,12 +50,16 @@ def detect(
     anthropic_client=None,
     model_name="local",
     llm_model="claude-haiku-4-5-20251001",
+    max_claims: int = None,
 ):
     from .scorer import load_model
 
+    sm = get_security_manager()
+    max_claims = max_claims if max_claims is not None else Config.MAX_CLAIMS
+
     start = perf_counter()
-    context = (context or "").strip()
-    response = (response or "").strip()
+    context = sm.sanitize((context or "").strip(), max_length=Config.MAX_TEXT_CHARS)
+    response = sm.sanitize((response or "").strip(), max_length=Config.MAX_TEXT_CHARS)
 
     if not context or not response:
         return DetectionResult(score=0.0, claims=[], elapsed_ms=0.0)
@@ -68,6 +73,9 @@ def detect(
         elapsed_ms = (perf_counter() - start) * 1000.0
         return DetectionResult(score=0.0, claims=[], elapsed_ms=elapsed_ms)
 
+    if len(claims) > max_claims:
+        claims = claims[:max_claims]
+
     model = load_model(model_name) if isinstance(model_name, str) else model_name
     claim_results = score_claims(claims, context, model=model)
 
@@ -80,13 +88,16 @@ def detect(
 
 
 def _llm_recheck(claim_results, context, client, model):
+    sm = get_security_manager()
     rechecked = []
     for result in claim_results:
         if result.label in ("supported", "partial"):
+            safe_claim = sm.sanitize(result.claim)
+            safe_context = sm.sanitize(context)
             prompt = (
-                f"Given this context:\n{context}\n\n"
+                f"Given this context:\n{safe_context}\n\n"
                 f"Is this claim supported, partial, or unsupported?\n"
-                f"Claim: {result.claim}\n"
+                f"Claim: {safe_claim}\n"
                 "Reply with one word only: supported, partial, or unsupported."
             )
             message = client.messages.create(

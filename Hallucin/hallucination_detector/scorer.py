@@ -1,4 +1,4 @@
-﻿"""
+"""
 Scores how well each claim is grounded in the provided context.
 
 Default behavior prefers `sentence-transformers` when available, then
@@ -110,6 +110,58 @@ class LocalHashEncoder:
                     gram_idx = hash(("gram", gram)) % self.dimensions
                     vector[gram_idx] += 0.25
 
+
+
+@dataclass
+class ClaimResult:
+    claim: str
+    label: SupportLabel
+    score: float
+    best_match: str
+
+
+class LocalHashEncoder:
+    """
+    Lightweight offline embedder using hashed token and char-gram features.
+    It is deterministic, fast, and avoids network/model downloads.
+    """
+
+    def __init__(self, dimensions: int = 1536):
+        self.dimensions = dimensions
+
+    def encode(
+        self,
+        texts: list[str],
+        convert_to_numpy: bool = True,
+        normalize_embeddings: bool = True,
+    ):
+        matrix = np.vstack([self._encode_one(text) for text in texts]).astype(np.float32)
+        if normalize_embeddings:
+            norms = np.linalg.norm(matrix, axis=1, keepdims=True)
+            norms[norms == 0] = 1.0
+            matrix = matrix / norms
+        return matrix if convert_to_numpy else matrix.tolist()
+
+    def _encode_one(self, text: str) -> np.ndarray:
+        vector = np.zeros(self.dimensions, dtype=np.float32)
+        text = text or ""
+        lowered = text.lower()
+        tokens = _TOKEN_RE.findall(lowered)
+
+        for token in tokens:
+            idx = hash(("tok", token)) % self.dimensions
+            vector[idx] += 1.0
+            if token.isdigit():
+                num_idx = hash(("num", token)) % self.dimensions
+                vector[num_idx] += 2.0
+
+            # Add short character grams to better catch name/number variations.
+            if len(token) >= 3:
+                for i in range(len(token) - 2):
+                    gram = token[i : i + 3]
+                    gram_idx = hash(("gram", gram)) % self.dimensions
+                    vector[gram_idx] += 0.25
+
         # Add lightweight length signal to separate very short snippets.
         vector[hash(("len", min(len(tokens), 30))) % self.dimensions] += 0.5
         vector[hash(("chars", min(len(lowered), 500))) % self.dimensions] += 0.25
@@ -124,6 +176,10 @@ def load_model(model_name: str = "all-MiniLM-L6-v2"):
     Falls back to a local hashing encoder when transformer loading fails
     (common in offline or restricted environments).
     """
+    from .security import get_security_manager
+    sm = get_security_manager()
+    model_name = sm.safe_model_name(model_name)
+
     if model_name in {"local-hash", "local"}:
         return LocalHashEncoder()
 
@@ -183,12 +239,16 @@ def score_claims(
     if not claims:
         return []
 
+    chunks = chunk_context(context)
+    
+    if len(claims) * len(chunks) > 50000:
+        raise ValueError("Too many claims or context chunks. Input exceeds processing capacity.")
+
     if model is None:
         model = load_model()
     elif isinstance(model, str):
         model = load_model(model)
 
-    chunks = chunk_context(context)
     unique_texts, remap = _dedupe_texts(claims + chunks)
     unique_embeddings = model.encode(
         unique_texts,

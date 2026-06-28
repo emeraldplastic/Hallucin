@@ -83,7 +83,8 @@ def test_privacy_headers_enabled_by_default():
     assert response.headers["Pragma"] == "no-cache"
     assert response.headers["X-Content-Type-Options"] == "nosniff"
     assert response.headers["X-Frame-Options"] == "DENY"
-    assert response.headers["Referrer-Policy"] == "no-referrer"
+    assert response.headers["Referrer-Policy"] == "strict-origin-when-cross-origin"
+    assert "Content-Security-Policy" in response.headers
 
 
 def test_privacy_headers_can_be_disabled():

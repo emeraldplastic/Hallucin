@@ -9,6 +9,8 @@ setup(
     install_requires=[
         "numpy>=1.24.0",
         "flask>=2.3.0",
+        "bleach>=6.0.0",
+        "python-dotenv>=1.0.0",
     ],
     extras_require={
         "full": [

@@ -1,4 +1,4 @@
-﻿"""
+"""
 Breaks an LLM response into atomic, individually verifiable claims.
 
 Strategy:
@@ -66,12 +66,17 @@ def split_claims_llm(text: str, client, model: str = "claude-sonnet-4-20250514")
     Use Claude to decompose a response into atomic factual claims.
     Each claim should be independently verifiable.
     """
+    from .security import get_security_manager
+    from .config import Config
+    sm = get_security_manager()
+    safe_text = sm.sanitize(text, max_length=Config.MAX_TEXT_CHARS)
+
     prompt = f"""Break the following text into a list of simple, atomic, factual claims.
 Each claim should be one sentence and independently verifiable.
 Return ONLY a numbered list. No preamble or explanation.
 
 Text:
-{text}"""
+{safe_text}"""
 
     message = client.messages.create(
         model=model,
