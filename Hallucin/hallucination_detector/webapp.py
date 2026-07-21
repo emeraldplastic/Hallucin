@@ -217,6 +217,24 @@ def create_app(config: dict[str, Any] | None = None) -> Flask:
     def health():
         return jsonify({"status": "ok"})
 
+    @app.get("/api/stats")
+    def stats():
+        """Return usage statistics for monitoring and analytics."""
+        return jsonify({
+            "rate_limit_stats": {
+                "max_requests": app.config["RATE_LIMIT_REQUESTS"],
+                "window_seconds": app.config["RATE_LIMIT_WINDOW_SECONDS"],
+                "active_clients": len(rate_limiter._requests)
+            },
+            "config": {
+                "max_upload_mb": app.config["MAX_CONTENT_LENGTH"] // (1024 * 1024),
+                "max_text_chars": app.config["MAX_TEXT_CHARS"],
+                "allowed_extensions": app.config["UPLOAD_ALLOWED_EXTENSIONS"],
+                "request_timeout": app.config["REQUEST_TIMEOUT"],
+                "privacy_headers_enabled": str(app.config.get("ENABLE_PRIVACY_HEADERS", "1")) not in ("0", "false", "False")
+            }
+        })
+
     @app.route("/api/analyze", methods=["OPTIONS"])
     def analyze_options():
         return jsonify({}), 200
