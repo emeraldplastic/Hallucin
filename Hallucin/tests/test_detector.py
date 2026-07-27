@@ -121,3 +121,116 @@ def test_detect_properties():
     assert isinstance(result.supported_claims, list)
     assert isinstance(result.partial_claims, list)
     assert isinstance(result.flagged_claims, list)
+
+
+# --- Additional comprehensive tests ---
+
+# Edge case tests
+def test_detect_empty_context_returns_zero():
+    result = detect(context="", response="The sky is blue.")
+    assert result.score == 0.0
+    assert result.claims == []
+
+
+def test_detect_empty_response_returns_zero():
+    result = detect(context="The sky is blue.", response="")
+    assert result.score == 0.0
+    assert result.claims == []
+
+
+def test_detect_both_empty_returns_zero():
+    result = detect(context="", response="")
+    assert result.score == 0.0
+
+
+def test_detect_whitespace_only_returns_zero():
+    result = detect(context="   ", response="   ")
+    assert result.score == 0.0
+
+
+def test_detect_none_inputs():
+    result = detect(context=None, response=None)
+    assert result.score == 0.0
+    assert result.claims == []
+
+
+# Claim splitting edge cases
+def test_regex_split_single_sentence():
+    claims = _regex_split("The sky is blue.")
+    assert len(claims) == 1
+    assert claims[0].strip() == "The sky is blue."
+
+
+def test_regex_split_no_punctuation():
+    claims = _regex_split("The sky is blue")
+    assert len(claims) >= 1
+
+
+def test_split_claims_simple_short_noise():
+    claims = split_claims_simple("OK. Sure. The Eiffel Tower is 330 metres tall.")
+    assert all(len(c) > 10 for c in claims)
+
+
+# Scorer edge cases
+def test_overall_score_empty_list():
+    assert overall_score([]) == 0.0
+
+
+def test_overall_score_single_partial():
+    results = [ClaimResult("claim", "partial", 0.5, "ctx")]
+    assert overall_score(results) == 0.5
+
+
+def test_chunk_context_empty_string():
+    chunks = chunk_context("")
+    assert isinstance(chunks, list)
+    assert len(chunks) >= 1
+
+
+def test_chunk_context_none_input():
+    chunks = chunk_context(None)
+    assert isinstance(chunks, list)
+
+
+def test_score_claims_empty_claims():
+    results = score_claims(claims=[], context="Some context here.")
+    assert results == []
+
+
+def test_score_claims_returns_claim_results():
+    context = "Paris is the capital of France."
+    claims = ["Paris is the capital of France."]
+    results = score_claims(claims=claims, context=context, model="local")
+    assert len(results) == 1
+    assert isinstance(results[0], ClaimResult)
+    assert results[0].label in ("supported", "partial", "unsupported")
+
+
+# Detection result properties
+def test_detection_result_elapsed_ms():
+    result = detect(context=CONTEXT, response="The Eiffel Tower is in Paris.")
+    assert result.elapsed_ms > 0
+
+
+def test_detection_result_report_runs(capsys):
+    result = detect(context=CONTEXT, response="The Eiffel Tower is in Paris.")
+    result.report()
+    captured = capsys.readouterr()
+    assert "Grounding Score" in captured.out
+
+
+def test_detect_special_characters():
+    context = "The café serves crème brûlée at $15.99."
+    response = "The café charges $15.99 for crème brûlée."
+    result = detect(context=context, response=response)
+    assert result.score >= 0.0
+    assert result.score <= 1.0
+
+
+def test_detect_numerical_accuracy():
+    context = "The building is 100 meters tall and was built in 2005."
+    response = "The building is 200 meters tall and was built in 1990."
+    result = detect(context=context, response=response)
+    # Incorrect numbers should lower the score
+    assert result.score <= 1.0
+

@@ -7,12 +7,34 @@ name = "hallucination-detector"
 version = "0.1.0"
 description = "Detect hallucinations in LLM responses by grounding claims against source context."
 requires-python = ">=3.9"
+readme = "README.md"
+license = {text = "MIT"}
+keywords = ["hallucination", "llm", "nlp", "grounding", "fact-checking", "ai-safety"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Text Processing :: Linguistic",
+]
 dependencies = [
     "numpy>=1.24.0",
     "flask>=2.3.0",
     "bleach>=6.0.0",
     "python-dotenv>=1.0.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/emeraldplastic/Hallucin"
+Repository = "https://github.com/emeraldplastic/Hallucin"
+Issues = "https://github.com/emeraldplastic/Hallucin/issues"
+Changelog = "https://github.com/emeraldplastic/Hallucin/blob/main/CHANGELOG.md"
 
 [project.optional-dependencies]
 full = [
