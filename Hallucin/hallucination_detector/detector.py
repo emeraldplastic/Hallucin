@@ -51,11 +51,15 @@ def detect(
     model_name="local",
     llm_model="claude-haiku-4-5-20251001",
     max_claims: int = None,
+    supported_threshold: float = None,
+    partial_threshold: float = None,
 ):
-    from .scorer import load_model
+    from .scorer import load_model, SUPPORTED_THRESHOLD, PARTIAL_THRESHOLD
 
     sm = get_security_manager()
     max_claims = max_claims if max_claims is not None else Config.MAX_CLAIMS
+    sup_thresh = supported_threshold if supported_threshold is not None else SUPPORTED_THRESHOLD
+    part_thresh = partial_threshold if partial_threshold is not None else PARTIAL_THRESHOLD
 
     start = perf_counter()
     context = sm.sanitize((context or "").strip(), max_length=Config.MAX_TEXT_CHARS)
@@ -77,7 +81,14 @@ def detect(
         claims = claims[:max_claims]
 
     model = load_model(model_name) if isinstance(model_name, str) else model_name
-    claim_results = score_claims(claims, context, model=model)
+    claim_results = score_claims(
+        claims,
+        context,
+        model=model,
+        supported_threshold=sup_thresh,
+        partial_threshold=part_thresh,
+    )
+
 
     if anthropic_client is not None:
         claim_results = _llm_recheck(claim_results, context, anthropic_client, llm_model)

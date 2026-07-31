@@ -234,3 +234,15 @@ def test_detect_numerical_accuracy():
     # Incorrect numbers should lower the score
     assert result.score <= 1.0
 
+
+def test_detect_custom_thresholds():
+    context = "The Eiffel Tower is in Paris."
+    response = "The Eiffel Tower is in Paris."
+    # High strictness
+    strict_res = detect(context=context, response=response, supported_threshold=0.99, partial_threshold=0.95)
+    # Standard strictness
+    normal_res = detect(context=context, response=response)
+    assert isinstance(strict_res.claims, list)
+    assert len(strict_res.claims) == len(normal_res.claims)
+
+

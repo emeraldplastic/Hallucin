@@ -162,3 +162,45 @@ def test_analyze_rate_limited_per_client():
     assert first.status_code == 400
     assert blocked.status_code == 429
     assert second.status_code == 400
+
+
+def test_metrics_endpoint():
+    client, _ = _client()
+    response = client.get("/api/metrics")
+    assert response.status_code == 200
+    data = response.get_json()
+    assert data["status"] == "healthy"
+    assert "max_context_chunks" in data
+
+
+def test_export_endpoint_markdown():
+    client, _ = _client()
+    response = client.post(
+        "/api/export",
+        json={
+            "context": "Paris is in France.",
+            "response": "Paris is in France.",
+            "format": "markdown",
+        },
+    )
+    assert response.status_code == 200
+    data = response.get_json()
+    assert data["format"] == "markdown"
+    assert "# Hallucin Studio Analysis Report" in data["content"]
+
+
+def test_export_endpoint_json():
+    client, _ = _client()
+    response = client.post(
+        "/api/export",
+        json={
+            "context": "Paris is in France.",
+            "response": "Paris is in France.",
+            "format": "json",
+        },
+    )
+    assert response.status_code == 200
+    data = response.get_json()
+    assert "score" in data
+    assert "claims" in data
+

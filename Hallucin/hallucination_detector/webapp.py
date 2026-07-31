@@ -235,6 +235,72 @@ def create_app(config: dict[str, Any] | None = None) -> Flask:
             }
         })
 
+    @app.get("/api/metrics")
+    def metrics():
+        """Return operational metrics for grounding engine health."""
+        return jsonify({
+            "status": "healthy",
+            "active_clients": len(rate_limiter._requests),
+            "max_text_chars": app.config["MAX_TEXT_CHARS"],
+            "max_context_chunks": Config.MAX_CONTEXT_CHUNKS,
+            "max_claims": Config.MAX_CLAIMS,
+        })
+
+    @app.post("/api/export")
+    def export_analysis():
+        payload = request.get_json(silent=True) or request.form
+        context = (payload.get("context", "") if payload else "").strip()
+        response_text = (payload.get("response", "") if payload else "").strip()
+        export_format = (payload.get("format", "markdown") if payload else "markdown").lower()
+
+        if not context or not response_text:
+            return jsonify({"error": "Both context and response are required for export"}), 400
+
+        result = detect(context=context, response=response_text)
+
+        if export_format == "json":
+            out_data = {
+                "score": result.score,
+                "elapsed_ms": result.elapsed_ms,
+                "counts": {
+                    "supported": len(result.supported_claims),
+                    "partial": len(result.partial_claims),
+                    "unsupported": len(result.flagged_claims),
+                },
+                "claims": [
+                    {
+                        "claim": c.claim,
+                        "label": c.label,
+                        "score": c.score,
+                        "best_match": c.best_match,
+                    }
+                    for c in result.claims
+                ],
+            }
+            return jsonify(out_data)
+
+        # Markdown format default
+        lines = [
+            "# Hallucin Studio Analysis Report",
+            f"- **Grounding Score**: {result.score:.2f} / 1.00",
+            f"- **Processing Time**: {result.elapsed_ms:.2f} ms",
+            f"- **Claims**: {len(result.supported_claims)} supported, {len(result.partial_claims)} partial, {len(result.flagged_claims)} unsupported",
+            "",
+            "## Claim Details",
+        ]
+        for claim in result.claims:
+            icon = "[OK]" if claim.label == "supported" else ("[~]" if claim.label == "partial" else "[X]")
+            lines.append(f"### {icon} [{claim.score:.2f}] {claim.claim}")
+            if claim.label != "supported":
+                lines.append(f"> Best Match: {claim.best_match}")
+            lines.append("")
+
+        return jsonify({
+            "format": "markdown",
+            "content": "\n".join(lines),
+        })
+
+
     @app.route("/api/analyze", methods=["OPTIONS"])
     def analyze_options():
         return jsonify({}), 200

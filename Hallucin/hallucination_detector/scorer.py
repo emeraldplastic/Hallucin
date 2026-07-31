@@ -184,6 +184,8 @@ def score_claims(
     claims: list[str],
     context: str,
     model=None,
+    supported_threshold: float = SUPPORTED_THRESHOLD,
+    partial_threshold: float = PARTIAL_THRESHOLD,
 ) -> list[ClaimResult]:
     """Score each claim against context and return structured labels."""
     if not claims:
@@ -233,7 +235,7 @@ def score_claims(
         results.append(
             ClaimResult(
                 claim=claim,
-                label=_label(score),
+                label=_label(score, supported_threshold, partial_threshold),
                 score=round(score, 4),
                 best_match=chunks[best_idx],
             )
@@ -249,6 +251,7 @@ def overall_score(claim_results: list[ClaimResult]) -> float:
     weights = {"supported": 1.0, "partial": 0.5, "unsupported": 0.0}
     total = sum(weights[result.label] for result in claim_results)
     return round(total / len(claim_results), 4)
+
 
 
 def _extract_numbers(text: str) -> set[str]:
@@ -330,14 +333,25 @@ def _apply_number_penalty(claim: str, base_score: float, chunk_nums: set[str]) -
     missing = [num for num in claim_nums if num not in chunk_nums]
     if not missing:
         return base_score
+    claim_nums = _extract_numbers(claim)
+    if not claim_nums:
+        return base_score
+
+    missing = [num for num in claim_nums if num not in chunk_nums]
+    if not missing:
+        return base_score
 
     penalty_ratio = min(0.45, 0.18 * len(missing))
     return max(0.0, base_score * (1.0 - penalty_ratio))
 
 
-def _label(score: float) -> SupportLabel:
-    if score >= SUPPORTED_THRESHOLD:
+def _label(
+    score: float,
+    supported_threshold: float = SUPPORTED_THRESHOLD,
+    partial_threshold: float = PARTIAL_THRESHOLD,
+) -> SupportLabel:
+    if score >= supported_threshold:
         return "supported"
-    if score >= PARTIAL_THRESHOLD:
+    if score >= partial_threshold:
         return "partial"
     return "unsupported"
