@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+import json
+from dataclasses import dataclass, field, asdict
 from time import perf_counter
 
 from .scorer import ClaimResult, overall_score, score_claims
@@ -25,6 +26,31 @@ class DetectionResult:
     @property
     def flagged_claims(self):
         return [c.claim for c in self.claims if c.label == "unsupported"]
+
+    def to_dict(self):
+        """Convert DetectionResult to dictionary for JSON serialization."""
+        return {
+            "score": self.score,
+            "elapsed_ms": self.elapsed_ms,
+            "counts": {
+                "supported": len(self.supported_claims),
+                "partial": len(self.partial_claims),
+                "unsupported": len(self.flagged_claims),
+            },
+            "claims": [
+                {
+                    "claim": c.claim,
+                    "label": c.label,
+                    "score": c.score,
+                    "best_match": c.best_match,
+                }
+                for c in self.claims
+            ],
+        }
+
+    def to_json(self, indent=None):
+        """Convert DetectionResult to JSON string."""
+        return json.dumps(self.to_dict(), indent=indent)
 
     def report(self):
         icons = {"supported": "[OK]", "partial": "[~]", "unsupported": "[X]"}
@@ -129,3 +155,22 @@ def _llm_recheck(claim_results, context, client, model):
                 continue
         rechecked.append(result)
     return rechecked
+
+
+def detect_batch(items, **kwargs):
+    """Process multiple context/response pairs in batch.
+
+    Args:
+        items: List of dicts with 'context' and 'response' keys
+        **kwargs: Additional arguments passed to detect()
+
+    Returns:
+        List of DetectionResult objects in the same order as input
+    """
+    results = []
+    for item in items:
+        context = item.get("context", "")
+        response = item.get("response", "")
+        result = detect(context=context, response=response, **kwargs)
+        results.append(result)
+    return results

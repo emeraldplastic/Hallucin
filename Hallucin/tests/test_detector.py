@@ -5,7 +5,8 @@ Unit tests for the hallucination detector.
 Run with: pytest tests/
 """
 
-from hallucination_detector import detect
+import json
+from hallucination_detector import detect, detect_batch, DetectionResult
 from hallucination_detector.scorer import ClaimResult, chunk_context, overall_score, score_claims
 from hallucination_detector.splitter import _regex_split, split_claims_simple
 
@@ -233,6 +234,96 @@ def test_detect_numerical_accuracy():
     result = detect(context=context, response=response)
     # Incorrect numbers should lower the score
     assert result.score <= 1.0
+
+
+# --- JSON serialization tests ---
+
+def test_detection_result_to_dict():
+    context = "Paris is the capital of France."
+    response = "Paris is the capital of France."
+    result = detect(context=context, response=response)
+    result_dict = result.to_dict()
+    
+    assert isinstance(result_dict, dict)
+    assert "score" in result_dict
+    assert "elapsed_ms" in result_dict
+    assert "counts" in result_dict
+    assert "claims" in result_dict
+    assert result_dict["counts"]["supported"] == len(result.supported_claims)
+    assert result_dict["counts"]["partial"] == len(result.partial_claims)
+    assert result_dict["counts"]["unsupported"] == len(result.flagged_claims)
+
+
+def test_detection_result_to_json():
+    context = "Paris is the capital of France."
+    response = "Paris is the capital of France."
+    result = detect(context=context, response=response)
+    json_str = result.to_json()
+    
+    assert isinstance(json_str, str)
+    parsed = json.loads(json_str)
+    assert parsed["score"] == result.score
+    assert "claims" in parsed
+
+
+def test_detection_result_to_json_pretty():
+    context = "Paris is the capital of France."
+    response = "Paris is the capital of France."
+    result = detect(context=context, response=response)
+    json_str = result.to_json(indent=2)
+    
+    assert isinstance(json_str, str)
+    assert "\n" in json_str  # Pretty printed
+    parsed = json.loads(json_str)
+    assert parsed["score"] == result.score
+
+
+# --- Batch detection tests ---
+
+def test_detect_batch_empty_list():
+    results = detect_batch([])
+    assert results == []
+
+
+def test_detect_batch_single_item():
+    items = [{"context": "Paris is in France.", "response": "Paris is in France."}]
+    results = detect_batch(items)
+    assert len(results) == 1
+    assert isinstance(results[0], DetectionResult)
+    assert results[0].score >= 0.0
+
+
+def test_detect_batch_multiple_items():
+    items = [
+        {"context": "Paris is in France.", "response": "Paris is in France."},
+        {"context": "The sky is blue.", "response": "The moon is made of cheese."},
+        {"context": "Water boils at 100C.", "response": "Water boils at 100C."},
+    ]
+    results = detect_batch(items)
+    assert len(results) == 3
+    assert all(isinstance(r, DetectionResult) for r in results)
+    assert results[0].score >= 0.5  # Should be grounded
+    assert results[1].score <= 0.5  # Should be hallucinated
+    assert results[2].score >= 0.5  # Should be grounded
+
+
+def test_detect_batch_with_kwargs():
+    items = [{"context": "Paris is in France.", "response": "Paris is in France."}]
+    results = detect_batch(items, model_name="local")
+    assert len(results) == 1
+    assert isinstance(results[0], DetectionResult)
+
+
+def test_detect_batch_preserves_order():
+    items = [
+        {"context": "Fact 1", "response": "Fact 1"},
+        {"context": "Fact 2", "response": "Fact 2"},
+        {"context": "Fact 3", "response": "Fact 3"},
+    ]
+    results = detect_batch(items)
+    assert len(results) == 3
+    # Order should be preserved
+    assert all(isinstance(r, DetectionResult) for r in results)
 
 
 def test_detect_custom_thresholds():
