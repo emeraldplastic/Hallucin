@@ -32,6 +32,7 @@ class Config:
     MAX_TEXT_CHARS = int(os.environ.get("HALLUCIN_MAX_TEXT_CHARS", "2000000"))
     MAX_CONTEXT_CHUNKS = int(os.environ.get("HALLUCIN_MAX_CONTEXT_CHUNKS", "240"))
     MAX_CLAIMS = int(os.environ.get("HALLUCIN_MAX_CLAIMS", "200"))
+    MAX_BATCH_ITEMS = int(os.environ.get("HALLUCIN_MAX_BATCH_ITEMS", "50"))
     TOP_MATCH_CANDIDATES = int(os.environ.get("HALLUCIN_TOP_MATCH_CANDIDATES", "3"))
     REQUEST_TIMEOUT = int(os.environ.get("HALLUCIN_REQUEST_TIMEOUT", "30"))
     FULL_CONTEXT_APPEND_LIMIT = int(os.environ.get("HALLUCIN_FULL_CONTEXT_APPEND_LIMIT", "20000"))

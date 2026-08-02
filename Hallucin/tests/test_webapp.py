@@ -204,3 +204,68 @@ def test_export_endpoint_json():
     assert "score" in data
     assert "claims" in data
 
+
+def test_analyze_batch_json_payload():
+    client, _ = _client()
+    response = client.post(
+        "/api/analyze/batch",
+        json={
+            "items": [
+                {"context": "Paris is in France.", "response": "Paris is in France."},
+                {"context": "The sky is blue.", "response": "The moon is made of cheese."},
+            ]
+        },
+    )
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["count"] == 2
+    assert len(payload["results"]) == 2
+    for item in payload["results"]:
+        assert "score" in item
+        assert "claims" in item
+        assert "counts" in item
+    assert payload["results"][0]["score"] >= 0.5
+    assert payload["results"][1]["score"] <= 0.5
+
+
+def test_analyze_batch_requires_items_array():
+    client, _ = _client()
+    missing = client.post("/api/analyze/batch", json={})
+    assert missing.status_code == 400
+    assert "At least one item" in missing.get_json()["error"]
+
+    empty = client.post("/api/analyze/batch", json={"items": []})
+    assert empty.status_code == 400
+
+    not_array = client.post("/api/analyze/batch", json={"items": {"context": "x", "response": "y"}})
+    assert not_array.status_code == 400
+    assert "array" in not_array.get_json()["error"]
+
+
+def test_analyze_batch_reports_per_item_errors():
+    client, _ = _client()
+    response = client.post(
+        "/api/analyze/batch",
+        json={
+            "items": [
+                {"context": "Paris is in France."},
+                {"response": "Paris is in France."},
+                "not-an-object",
+            ]
+        },
+    )
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["count"] == 3
+    assert all("error" in item for item in payload["results"])
+
+
+def test_analyze_batch_respects_item_cap():
+    client, _ = _client({"MAX_BATCH_ITEMS": 1})
+    response = client.post(
+        "/api/analyze/batch",
+        json={"items": [{"context": "a", "response": "b"}, {"context": "c", "response": "d"}]},
+    )
+    assert response.status_code == 400
+    assert "Batch is limited to 1" in response.get_json()["error"]
+

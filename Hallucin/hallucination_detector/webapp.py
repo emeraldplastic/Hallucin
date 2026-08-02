@@ -22,6 +22,28 @@ from .security import get_security_manager
 from .observability import log_event
 
 
+def _serialize_result(result) -> dict[str, Any]:
+    """Serialize a DetectionResult into the shared API response shape."""
+    return {
+        "score": result.score,
+        "elapsed_ms": round(result.elapsed_ms, 2),
+        "counts": {
+            "supported": len(result.supported_claims),
+            "partial": len(result.partial_claims),
+            "unsupported": len(result.flagged_claims),
+        },
+        "claims": [
+            {
+                "claim": claim.claim,
+                "label": claim.label,
+                "score": claim.score,
+                "best_match": claim.best_match,
+            }
+            for claim in result.claims
+        ],
+    }
+
+
 def _parse_allowed_extensions(raw_extensions: str) -> tuple[str, ...]:
     normalized: list[str] = []
     for value in raw_extensions.split(","):
@@ -94,6 +116,7 @@ def create_app(config: dict[str, Any] | None = None) -> Flask:
     app.config["RATE_LIMIT_WINDOW_SECONDS"] = Config.RATE_LIMIT_WINDOW_SECONDS
     app.config["MAX_TEXT_CHARS"] = Config.MAX_TEXT_CHARS
     app.config["REQUEST_TIMEOUT"] = Config.REQUEST_TIMEOUT
+    app.config["MAX_BATCH_ITEMS"] = Config.MAX_BATCH_ITEMS
     app.config["ENABLE_PRIVACY_HEADERS"] = Config.ENABLE_PRIVACY_HEADERS
     app.config["FORCE_SECURE_COOKIES"] = Config.FORCE_SECURE_COOKIES
     app.config["UPLOAD_ALLOWED_EXTENSIONS"] = Config.get_allowed_extensions()
@@ -365,6 +388,32 @@ def create_app(config: dict[str, Any] | None = None) -> Flask:
         finally:
             if hasattr(signal, 'SIGALRM'):
                 signal.alarm(0)
+
+    @app.post("/api/analyze/batch")
+    def analyze_batch():
+        payload = request.get_json(silent=True) or {}
+        items = payload.get("items", [])
+        if not isinstance(items, list):
+            return jsonify({"error": "'items' must be an array of context/response objects"}), 400
+        if not items:
+            return jsonify({"error": "At least one item is required"}), 400
+        if len(items) > app.config["MAX_BATCH_ITEMS"]:
+            return jsonify({"error": f"Batch is limited to {app.config['MAX_BATCH_ITEMS']} items per request"}), 400
+
+        results = []
+        for item in items:
+            if not isinstance(item, dict):
+                results.append({"error": "Each batch item must be an object with 'context' and 'response'"})
+                continue
+            context = (item.get("context") or "").strip()
+            response = (item.get("response") or "").strip()
+            if not context or not response:
+                results.append({"error": "Both 'context' and 'response' are required for every item"})
+                continue
+            result = detect(context=context, response=response)
+            results.append(_serialize_result(result))
+
+        return jsonify({"count": len(results), "results": results})
 
     @app.errorhandler(RequestEntityTooLarge)
     def too_large(_: RequestEntityTooLarge):

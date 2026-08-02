@@ -2,6 +2,11 @@
 
 All notable changes to Hallucin Studio are documented here.
 
+## [Unreleased]
+
+### Added
+- Batch analysis REST endpoint (`POST /api/analyze/batch`) with per-item results and configurable `HALLUCIN_MAX_BATCH_ITEMS` cap.
+
 ## [0.1.0] — 2026-05-02
 
 ### Added

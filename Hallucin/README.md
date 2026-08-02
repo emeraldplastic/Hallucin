@@ -138,6 +138,35 @@ result.report()               # Print a formatted grounding report
 }
 ```
 
+### `POST /api/analyze/batch`
+
+Scores multiple context/response pairs in a single request. Each item is scored independently and returned in the same order.
+
+**JSON payload:**
+
+```json
+{
+  "items": [
+    { "context": "trusted source text", "response": "model output to evaluate" },
+    { "context": "second source", "response": "second model output" }
+  ]
+}
+```
+
+**Response:**
+
+```json
+{
+  "count": 2,
+  "results": [
+    { "score": 0.85, "elapsed_ms": 12.34, "counts": { "supported": 3, "partial": 1, "unsupported": 0 }, "claims": [] },
+    { "score": 0.12, "elapsed_ms": 9.87, "counts": { "supported": 0, "partial": 1, "unsupported": 2 }, "claims": [] }
+  ]
+}
+```
+
+Invalid items are reported inline with an `"error"` field instead of failing the whole request. The batch size is limited by `HALLUCIN_MAX_BATCH_ITEMS` (default 50).
+
 ### `GET /health`
 
 Returns `{"status": "ok"}` — use for uptime monitoring and load balancer checks.
@@ -157,6 +186,7 @@ All settings are optional and configured via environment variables.
 | `HALLUCIN_RATE_LIMIT_WINDOW_SECONDS` | `60` | Rate limit window duration |
 | `HALLUCIN_ENABLE_PRIVACY_HEADERS` | `1` | Enable no-store/no-cache headers |
 | `HALLUCIN_MAX_CONTEXT_CHUNKS` | `240` | Max context chunks for scoring |
+| `HALLUCIN_MAX_BATCH_ITEMS` | `50` | Max context/response items per batch analysis request |
 | `HALLUCIN_TOP_MATCH_CANDIDATES` | `3` | Top-N semantic candidates per claim |
 | `HALLUCIN_USE_SPACY` | `0` | Use spaCy for sentence splitting |
 | `HALLUCIN_API_KEYS` | (None) | Comma-separated allowed API keys |
